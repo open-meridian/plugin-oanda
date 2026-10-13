@@ -32,3 +32,6 @@ jobs:
           name: e2e-latest-logs
           path: .e2e/*.log
           if-no-files-found: ignore
+          # .e2e is a hidden directory, which upload-artifact leaves out
+          # unless told.
+          include-hidden-files: true
