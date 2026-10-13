@@ -1,0 +1,15 @@
+.git
+__pycache__
+*.pyc
+.venv
+# The coding agents' files: in neither the image nor what `meridian plugin
+# dev` sends, which reads this list too.
+AGENTS.md
+.claude
+CLAUDE.md
+CLAUDE.local.md
+.meridian
+# What `make test`, `make preview` and `make e2e` leave behind.
+.test.log
+preview/
+.e2e

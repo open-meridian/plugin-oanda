@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oanda"
+version = "0.1.0"
+description = "Spot FX through OANDA's v20 API for an Open Meridian deployment: orders placed and filled, and the account's positions, cash and activity"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+# The SDK and nothing else, pinned exactly: the sidecar this runs beside
+# speaks one version of the contract, and a range would let a rebuild pick up
+# another. The Dockerfile's base is the same version. OANDA's v20 API is
+# reached with the standard library alone (src/oanda/venue.py).
+dependencies = ["open-meridian==0.26.0"]
+
+[project.urls]
+Repository = "https://github.com/open-meridian/plugin-oanda"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "mypy>=1.11",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+oanda = "oanda.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The pages' templates, installed beside the code that renders them.
+[tool.setuptools.package-data]
+oanda = ["templates/*.html"]
+
+# What this plugin says about itself, which `meridian plugin upload` sends and
+# a deployment admin approves before it runs (W8). Declarations, not grants.
+[tool.meridian]
+# Roles from the deployment's fixed list -- compliance, confirmation,
+# connectivity, custody, data, ems, oms, operations, portfolio, reporting,
+# servicing, settlement, signal -- and its grants are theirs (ruled
+# 2026-10-13, the spot-FX plugin's Q1: `connectivity` and `custody` in the
+# first build, `data` later). `connectivity` (contract v22, W11): it places
+# the placements naming it at OANDA and reports what OANDA did with them.
+# `custody` (W2): the account's sync status, statements and activity.
+roles = ["custody", "connectivity"]
+# Whether it serves a page through its sidecar.
+interface = true
+# Its declaration (contract v11): its secret setting's name, what it receives
+# from OANDA and does not carry, and the storage it asks for its raw records.
+declaration = "oanda.declaration:DECLARATION"
+
+[tool.ruff]
+line-length = 96
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["oanda"]
+# The tests' shared stand-ins, imported by name from tests/.
+known-local-folder = ["conftest", "rigs"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests"]
+
+# The SDK's gRPC stubs have no types (meridian-python's own configuration
+# says the same).
+[[tool.mypy.overrides]]
+module = [
+    "meridian.v1.sidecar_pb2_grpc",
+    "meridian.v1.envelope_pb2_grpc",
+    "meridian.plugin.v1.operations_pb2_grpc",
+]
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

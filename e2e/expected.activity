@@ -1,0 +1,12 @@
+activity|E2E OANDA|oanda|10|11||2026-06-04|
+activity|E2E OANDA|oanda|11|13||2026-06-05|
+activity|E2E OANDA|oanda|12|0||2026-06-08|
+activity|E2E OANDA|oanda|13|10||2026-06-09|
+activity|E2E OANDA|oanda|15|1|local(iso4217:XAU)|2026-06-10|1
+activity|E2E OANDA|oanda|2|12||2026-06-01|
+activity|E2E OANDA|oanda|4|1|local(iso4217:EUR, open_meridian:INS-01JEUR00000000000000000001)|2026-06-02|10000
+activity|E2E OANDA|oanda|5|5||2026-06-03|
+activity|E2E OANDA|oanda|7|1|local(iso4217:USD, open_meridian:INS-01JUSD00000000000000000001)|2026-06-03|5000
+activity|E2E OANDA|oanda|9:commission|6||2026-06-03|
+activity|E2E OANDA|oanda|9:conversion|14|local(iso4217:JPY, open_meridian:INS-01JJPY00000000000000000001)|2026-06-03|-5000.00000
+activity|E2E OANDA|oanda|9|2|local(iso4217:USD, open_meridian:INS-01JUSD00000000000000000001)|2026-06-03|-5000

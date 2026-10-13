@@ -1,0 +1,55 @@
+# The plugin's tests, lint and types, in a container, because the host has no
+# toolchain to rely on (meridian-python does the same). Git is here for an
+# SDK pinned by commit while one is being tried.
+ARG PYTHON_VERSION=3.12
+
+# The SDK's source, where `make` is given one (SDK_REPO): an SDK release not
+# yet published, tried from the sibling checkout that carries exactly the
+# version pyproject.toml pins. Empty, the pin comes from PyPI.
+FROM scratch AS sdk
+
+FROM python:${PYTHON_VERSION}-slim AS base
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /w
+COPY pyproject.toml ./
+COPY src src
+RUN --mount=type=bind,from=sdk,target=/sdk,rw --mount=type=cache,target=/root/.cache/pip \
+    if [ -f /sdk/pyproject.toml ]; then pip install /sdk; fi
+RUN --mount=type=cache,target=/root/.cache/pip pip install -e ".[dev]"
+COPY tests tests
+
+# Run by `make test` and `make preview` with `docker run`.
+FROM base AS test
+
+# A meridian built locally, where `make` is given one (MERIDIAN_BIN): a
+# directory holding the binary of a release not yet published, being tried,
+# as SDK_REPO is for the SDK. Empty, check.yaml's release is installed.
+FROM scratch AS cli
+
+# meridian, as check.yaml installs it: its own installer, from the release's
+# tag, which checks the binary against the checksum published beside it. A
+# stage of its own, so a change to the plugin does not download it again.
+FROM python:${PYTHON_VERSION}-slim AS meridian
+ARG MERIDIAN_VERSION
+RUN --mount=type=bind,from=cli,target=/cli \
+    test -n "${MERIDIAN_VERSION}" \
+ && if [ -x /cli/meridian ]; then cp /cli/meridian /usr/local/bin/meridian; else \
+    apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL "https://raw.githubusercontent.com/open-meridian/meridian-cli/v${MERIDIAN_VERSION}/install.sh" \
+    | MERIDIAN_VERSION="${MERIDIAN_VERSION}" MERIDIAN_INSTALL_DIR=/usr/local/bin sh; fi \
+ && /usr/local/bin/meridian --version
+
+# Run by `make check` with `docker run`, the repository mounted over /w:
+# check.yaml's job, on the plugin and its dev extras installed as above.
+FROM base AS check
+COPY --from=meridian /usr/local/bin/meridian /usr/local/bin/meridian
+
+FROM base AS lint
+RUN python -m ruff check src tests \
+ && python -m ruff format --check src tests \
+ && python -m mypy

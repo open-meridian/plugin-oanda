@@ -1,0 +1,19 @@
+{#- Connections, at admin: the custody role's page with OANDA's connection,
+    its trading, and "Enable trading" for an admin of connectivity (a new
+    connection is read-only). No account's data. -#}
+{% extends "meridian/roles/custody/connections.html" %}
+{% import "meridian/kit.html" as kit %}
+{% block vendor_notices %}
+{% if notice %}{{ kit.notice(notice) }}{% endif %}
+{% if waiting %}<div class="notice warn" role="status">Waiting for its settings: {{ waiting|join(", ") }}.</div>{% endif %}
+{% if data.mode %}<p class="hint">Reaching: {{ data.mode }}.</p>{% endif %}
+{% endblock %}
+{% block vendor_columns %}
+{% if row is none %}<th>Trading</th><th class="wide-only">Placements</th><th></th>
+{%- else %}<td>{% if row.trading %}{{ kit.badge("Enabled", "good") }}{% else %}{{ kit.badge("Read-only", "warn") }}{% endif %}</td><td class="wide-only">{{ row.working }} working, {{ row.held }} held, {{ row.unknown }} asked about, {{ row.waiting_for_a_value_date }} waiting for a value date</td>
+<td>{%- if not row.trading and caller.level_for("connectivity") == admin_level -%}
+{%- if "enable_trading" in caller.second_pair_of_eyes %}{{ kit.action(paths.enable_trading, "Prepare", fields={"connection_id": row.connection_id, "prepare": "1"}, label="Prepare: enable trading on " ~ row.connection) }}
+{%- else %}{{ kit.action(paths.enable_trading, "Enable trading", fields={"connection_id": row.connection_id}, label="Enable trading on " ~ row.connection) }}{% endif -%}
+{%- endif -%}</td>
+{%- endif %}
+{% endblock %}

@@ -1,0 +1,17 @@
+# The plugin harness's `oanda` service, this plugin as `make e2e` runs it:
+# the harness's own README offers an override of a plugin's service, by its
+# instance name. Its root read-only and /tmp writable, as the chart's pod has
+# them; OANDA's raw records go to the storage the harness grants an edge
+# plugin (decisions/028), not to /tmp.
+services:
+  oanda:
+    read_only: true
+    tmpfs:
+      - /tmp:uid=65532,gid=65532,mode=1777
+  # The desk the order path places from (contract v22): a stand-in holding
+  # portfolio, oms and ems, run from this plugin's image (e2e/desk.py).
+  desk:
+    entrypoint: ["python", "-u", "/e2e/desk.py"]
+    read_only: true
+    volumes:
+      - ${E2E_DIR:?set E2E_DIR to this repository's e2e directory, absolute}:/e2e:ro

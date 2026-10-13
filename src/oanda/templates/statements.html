@@ -1,0 +1,27 @@
+{#- Statements, at write and read: the custody role's page, and the
+    account's rows by currency, each with what is pending on each value date
+    (an open position's two cash legs, rolling at each 17:00 New York). -#}
+{% extends "meridian/roles/custody/statements.html" %}
+{% import "meridian/kit.html" as kit %}
+{% block head_actions %}
+{% if level == "write" %}{{ kit.action(paths.read, "Refresh", header="refresh", icon="refresh", label="Refresh", fields={"back": "/"}) }}{% endif %}
+{% endblock %}
+{% block vendor_notices %}
+{% if notice %}{{ kit.notice(notice) }}{% endif %}
+{% endblock %}
+{% block vendor_sections %}
+{% for statement in data.statements %}
+<section class="panel">
+<h2>{{ statement.account }}: by currency</h2>
+{% if statement.rows %}
+<table class="one-line"><thead><tr><th>Currency</th><th class="num">Quantity</th><th class="num">Settled</th><th>Pending</th></tr></thead><tbody>
+{% for row in statement.rows %}
+<tr><td><strong>{{ row.currency }}</strong></td><td class="num">{{ row.quantity }}</td><td class="num">{{ row.settled }}</td><td>{% for leg in row.pending %}{{ leg.quantity }} on {{ leg.value_date }}{% if not loop.last %}; {% endif %}{% else %}<span class="faint">none</span>{% endfor %}</td></tr>
+{% endfor %}
+</tbody></table>
+{% else %}
+{{ kit.empty("Not read yet") }}
+{% endif %}
+</section>
+{% endfor %}
+{% endblock %}

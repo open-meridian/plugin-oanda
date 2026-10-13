@@ -1,0 +1,4 @@
+position|E2E OANDA|local(iso4217:EUR, open_meridian:INS-01JEUR00000000000000000001)|long|10000|||
+position|E2E OANDA|local(iso4217:USD, open_meridian:INS-01JUSD00000000000000000001)|long|85493.88600|||
+position|E2E OANDA|local(iso4217:XAU)|long|1|||
+statement|E2E OANDA|oanda|3|complete||337.4975 USD||false

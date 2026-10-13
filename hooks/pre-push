@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Pre-push gate for a plugin: CI-first (ruled 2026-10-13).
+#
+# A plugin's change lands through a pull request: push a branch, open the pull
+# request, and its CI (ci, check, e2e) is the first line; merge when green.
+# Pushing a branch therefore runs nothing here. `make ci-local` stays the way
+# to reproduce or debug a CI failure locally.
+#
+# A push straight to main skips the pull request, so it still runs the local
+# gate first, promoted to ci-local-deep for a diff touching build inputs,
+# workflow definitions or the wire schema.
+#
+# Activate on a fresh clone with:  make install-hooks
+# --no-verify bypasses this. It is not recommended and settings.json denies it
+# to agent sessions.
+
+set -euo pipefail
+
+to_main=""
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  [ "$remote_ref" = "refs/heads/main" ] && to_main=1
+done
+
+if [ -z "$to_main" ]; then
+  echo "pre-push: a branch push; CI on its pull request is the gate (CI-first)."
+  exit 0
+fi
+
+RISKY='(^|/)(Dockerfile[^/]*|Makefile|pyproject\.toml|\.github/workflows/)'
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+if [ -n "$upstream" ]; then
+  changed="$(git diff --name-only "$upstream"...HEAD 2>/dev/null || true)"
+else
+  changed="$(git diff --name-only HEAD 2>/dev/null || true)"
+fi
+
+target="ci-local"
+if echo "$changed" | grep -qE "$RISKY"; then
+  target="ci-local-deep"
+  echo "pre-push: diff touches a risky path, promoting to $target"
+fi
+
+echo "pre-push: a push straight to main; running make $target"
+if ! make "$target"; then
+  echo
+  echo "pre-push: BLOCKED -- make $target failed."
+  echo "Land it through a pull request instead, or fix it locally."
+  exit 1
+fi
