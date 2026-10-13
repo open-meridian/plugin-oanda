@@ -148,7 +148,9 @@ def sent_once(placement_id):
 
 
 def run():
-    # 1. Set up.
+    # 1. Set up, once the desk has registered: on a fast runner the custody
+    # steps can end before it has.
+    runner("ready", "--instance", "desk")
     account = runner("account", "E2E Orders", "--instance", "desk").strip().splitlines()[-1]
     for role in ("portfolio", "oms", "ems"):
         runner("grant", "--instance", "desk", "--level", "write", "--role", role, "--accounts", account)
