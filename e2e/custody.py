@@ -8,10 +8,12 @@ nothing reaches OANDA, its practice host or its live one.
 3. The street holds the account's statement exactly as
    e2e/expected.street says: a row per currency, each open position as its
    two cash legs (rolling spot, ruled 2026-10-13), and the account's figures
-   (its margin used). The harness's platform holds no spot-date rule, so no
-   leg's value date can be worked out, and each row states no settled or
-   pending split rather than a guessed date (the street takes no pending
-   quantity without its date).
+   (its margin used). The deployment holds no EUR/USD spot-date rule until
+   this first statement's read misses it and it is pulled from the harness's
+   platform, so no leg of the first statement can be dated, and each row
+   states no settled or pending split rather than a guessed date (the street
+   takes no pending quantity without its date). The order path (orders.py),
+   later, reads the pulled rule: its fills pend to the date it gives.
 4. The street's activity is e2e/expected.activity: the account's history
    backfilled to its opening, one of each kind OANDA's transactions convert
    to, each once.
@@ -143,10 +145,11 @@ def run():
     print(
         f"custody OK: sample data on and E2E OANDA linked through Account links; the street "
         f"holds the statement as e2e/expected.street ({len(statement)} lines: a row per "
-        f"currency of the open positions' two cash legs, no settled or pending split where the "
-        f"harness's platform holds no spot-date rule to date them); the activity backfilled to the "
-        f"account's opening as e2e/expected.activity ({len(activity)} activities), each once, "
-        f"and again from a new container nothing twice; a row's raw record resolved"
+        f"currency of the open positions' two cash legs, no settled or pending split before "
+        f"the deployment has pulled the spot-date rule that dates them); the activity "
+        f"backfilled to the account's opening as e2e/expected.activity ({len(activity)} "
+        f"activities), each once, and again from a new container nothing twice; a row's raw "
+        f"record resolved"
     )
 
 

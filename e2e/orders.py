@@ -49,6 +49,10 @@ LOG = ".e2e/orders.log"
 CODE = "101-001-0000000-001"
 CONNECTION = f"synthetic:{CODE}"
 WORKS = "1000000"
+# EUR's cash instrument as `store book` prints it: the deployment's record
+# (its LCL- ID, drawn per run) by its identifiers in force, the harness's
+# published format.
+EUR_IN_BOOK = "local(iso4217:EUR, open_meridian:INS-01JEUR00000000000000000001)"
 
 
 class Failed(Exception):
@@ -127,8 +131,9 @@ def book():
     return compose("run", "--rm", "-T", "store", "book").stdout.splitlines()
 
 
-def pending(lines, instrument):
-    """The account's pending long lines in an instrument, by value date."""
+def pending(lines, instrument=EUR_IN_BOOK):
+    """The account's pending long lines in an instrument, as the book prints
+    it, by value date."""
     held = {}
     for line in lines:
         parts = line.split("|")
@@ -217,7 +222,7 @@ def run():
           "step 2, the synthetic OANDA never filled it")
     until(90, placement_state(account, order, placement, "PLACEMENT_STATE_FILLED"),
           "step 2, the fill was not recorded with its value date")
-    first = until(30, lambda: pending(book(), eur), "step 2, EUR not pending to a value date")
+    first = until(30, lambda: pending(book()), "step 2, EUR not pending to a value date")
     must(list(first.values()) == [Decimal(10000)], f"step 2, 10,000 EUR pending: {first}")
     (value_date,) = first
 
@@ -228,7 +233,7 @@ def run():
           "step 3, the market order was not filled")
     must(len(sent_once(placement3)) == 1, "step 3, sent to OANDA once")
     def fifteen_pending():
-        held = pending(book(), eur)
+        held = pending(book())
         return held if held.get(value_date) == 15000 else None
 
     both = until(30, fifteen_pending, "step 3, EUR's 15,000 not pending to the value date")
@@ -244,14 +249,14 @@ def run():
     must(outside["instrument_id"] == eur and outside["side"] == "SIDE_BUY"
          and Decimal(outside["quantity"]) == 2000 and outside["venue_order_id"],
          f"step 4, the app's fill: {outside}")
-    must(pending(book(), eur) == both, "step 4, an unmatched fill moves nothing")
+    must(pending(book()) == both, "step 4, an unmatched fill moves nothing")
 
     # 5. OANDA's 17:00 New York roll.
     ask_oanda({"roll": True})
 
     def rolled():
         lines = book()
-        held = pending(lines, eur)
+        held = pending(lines)
         return (held, lines) if entries(lines, "value-date-rolled") and value_date not in held \
             else None
 
@@ -266,7 +271,7 @@ def run():
 
     def caught_up():
         lines = book()
-        held = pending(lines, eur)
+        held = pending(lines)
         done = held == {rolled_to: Decimal(17000)} and len(entries(lines, "value-date-rolled")) == 2
         return lines if done else None
 
@@ -337,8 +342,8 @@ def run():
     for wanted in ("order|E2E Orders|", "placement|E2E Orders|", "execution|E2E Orders|"):
         must(any(line.startswith(wanted) for line in lines), f"step 10, store book prints {wanted!r}")
     executions = [line for line in lines if line.startswith("execution|E2E Orders|")]
-    must(pending(lines, eur) == {rolled_to: Decimal(17000)},
-         f"step 10, EUR's 17,000 pending to {rolled_to}: {pending(lines, eur)}")
+    must(pending(lines) == {rolled_to: Decimal(17000)},
+         f"step 10, EUR's 17,000 pending to {rolled_to}: {pending(lines)}")
     print(
         f"orders OK: trading enabled on the connection; the desk's buy of 10,000 EUR at 1.08000 "
         f"USD acknowledged ({held['venue_order_id']}), filled at the synthetic OANDA as EUR_USD "
