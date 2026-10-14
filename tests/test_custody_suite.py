@@ -21,6 +21,10 @@ How the mapped ones are presented, where it is not plain:
   EUR_USD position's EUR leg, whose units OANDA states and whose settled
   quantity it does not: 0, by the rolling rule, its units pending to the
   value date the date read gives (computed, not stated by OANDA).
+- `resolve-gives-the-currency-with-its-provenance`: each currency leg is
+  resolved by the ISO 4217 code OANDA names it by (EUR_USD's EUR and USD,
+  the account's own currency), its currency that code: stated, so the
+  resolve carries no provenance entry.
 - `kind-not-converted-on-an-ambiguous-resolve`: an open XAU_USD position,
   which OANDA types METAL, its XAU leg's ISO 4217 code meeting two records.
 - `account-kind-not-known`: an account whose margin rate is 1 (no
@@ -150,7 +154,7 @@ PRODUCERS: dict[str, Producer] = {
     "institution-not-stated": read,
     "settled-quantity-not-stated": read,
     "pending-by-value-date": read,
-    "resolve-states-what-the-source-states": read,
+    "resolve-gives-the-currency-with-its-provenance": read,
     "kind-not-converted-on-an-ambiguous-resolve": read,
     "activity-purchase": read,
     "activity-sale": read,
