@@ -44,9 +44,16 @@ And by its units, so each of OANDA's answers has an order to show it:
   state OANDA's mapping does not know (`PENDING_REVIEW`), then PENDING.
 
 **The roll.** At each 17:00 New York the account's open trades are rolled:
-a DAILY_FINANCING transaction, each open trade's financing beside it,
-tripled on a Wednesday as OANDA's US financing FAQ describes. `roll()`
-does it at once, for a test.
+a DAILY_FINANCING transaction at that moment, each open trade's financing
+beside it, tripled on a Wednesday as OANDA's US financing FAQ describes.
+`roll()` rolls them at once, as at the trading day's coming 17:00, for a test
+and the e2e, so the day's own 17:00 rolls nothing again.
+
+**OANDA's own app** (contract v23's venue-originated fills). `in_the_app()`
+takes a market order as OANDA's platform or app takes one, outside the
+plugin: no client extensions, filled at once. The e2e asks for one, or for a
+roll, through `ask()`: a request file in the account's state directory, taken
+on the synthetic account's next step, so nothing writes its state but itself.
 """
 
 from __future__ import annotations
@@ -57,7 +64,7 @@ import os
 import tempfile
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 from pathlib import Path
 from typing import Any
@@ -122,6 +129,18 @@ def _q(value: Decimal, places: Decimal = CENTS) -> Decimal:
 
 def _s(value: Decimal) -> str:
     return f"{value:f}"
+
+
+def _cut(day: date) -> str:
+    """The 17:00 New York that ends a trading day, as OANDA writes a time."""
+    ends = datetime.combine(day, time(moments.DAY_ENDS), tzinfo=moments.NEW_YORK)
+    return moments.rfc3339(moments.of(ends))
+
+
+def _days_financed(day: date) -> int:
+    """A roll at a day's 17:00 finances one day; a Wednesday's three, the
+    weekend's value days with it (OANDA's US financing FAQ)."""
+    return 3 if day.weekday() == 2 else 1
 
 
 def _price_text(instrument: str, value: Decimal) -> str:
@@ -437,21 +456,64 @@ class SyntheticOanda(Venue):
         )
 
     def roll(self) -> Json | None:
-        """Roll the open trades now, as at a 17:00 New York (a Wednesday's
-        tripled)."""
+        """Roll the open trades now, as at the trading day's coming 17:00
+        New York (a Wednesday's tripled); that 17:00 then rolls nothing
+        again."""
         day = moments.trading_day(self._clock.ns())
-        made = self._financing(self._clock.text(), 3 if day.weekday() == 3 else 1)
-        self._state["rolled"] = day.isoformat()
+        made = self._financing(_cut(day), _days_financed(day))
+        self._state["rolled"] = (day + timedelta(days=1)).isoformat()
         self._save()
         return made
 
+    def in_the_app(self, instrument: str, units: Decimal) -> str:
+        """A market order taken in OANDA's own platform or app, outside the
+        plugin: no client extensions, filled at once. Its order's ID."""
+        answer = self._create(
+            {
+                "type": "MARKET",
+                "instrument": instrument,
+                "units": _s(units),
+                "timeInForce": "FOK",
+                "positionFill": "DEFAULT",
+            }
+        )
+        self._save()
+        return str(answer["orderCreateTransaction"]["id"])
+
+    def _asked(self) -> bool:
+        """The requests `ask()` left beside the state, each taken once."""
+        if self._file is None:
+            return False
+        inbox = self._file.parent / "app"
+        if not inbox.is_dir():
+            return False
+        taken = False
+        for asked in sorted(inbox.glob("*.json")):
+            try:
+                request = json.loads(asked.read_text())
+            except (OSError, ValueError):
+                continue
+            asked.unlink(missing_ok=True)
+            if not isinstance(request, dict):
+                continue
+            if request.get("roll"):
+                self.roll()
+                taken = True
+            order = request.get("order")
+            if isinstance(order, dict) and order.get("instrument") in INSTRUMENTS:
+                self.in_the_app(str(order["instrument"]), Decimal(str(order.get("units"))))
+                taken = True
+        return taken
+
     def _tick(self) -> None:
-        """One step on: a roll if a 17:00 New York has passed, then each
-        working limit or stop order filled; saved where anything changed."""
-        changed = False
+        """One step on: what was asked of it, a roll if a 17:00 New York has
+        passed, then each working limit or stop order filled; saved where
+        anything changed."""
+        changed = self._asked()
         day = moments.trading_day(self._clock.ns())
         if self._state.get("rolled") and day.isoformat() > self._state["rolled"]:
-            self._financing(self._clock.text(), 3 if day.weekday() == 3 else 1)
+            ended = day - timedelta(days=1)
+            self._financing(_cut(ended), _days_financed(ended))
             self._state["rolled"] = day.isoformat()
             changed = True
         for order in sorted(self._state["orders"].values(), key=lambda o: int(o["id"])):
@@ -864,3 +926,17 @@ class SyntheticOanda(Venue):
 def state_file(storage: Path | None) -> Path | None:
     """Where the synthetic account is kept: in the plugin's storage."""
     return storage / "synthetic-oanda" / "state.json" if storage is not None else None
+
+
+def ask(storage: Path, request: Json) -> None:
+    """Ask the synthetic account in `storage` for an order in OANDA's own
+    app (`{"order": {"instrument": ..., "units": ...}}`) or a roll
+    (`{"roll": true}`), taken on its next step: the e2e's way in."""
+    held = state_file(storage)
+    assert held is not None
+    inbox = held.parent / "app"
+    inbox.mkdir(parents=True, exist_ok=True)
+    made, written = tempfile.mkstemp(dir=inbox, suffix=".tmp")
+    with os.fdopen(made, "w") as file:
+        json.dump(request, file)
+    os.replace(written, inbox / f"{moments.of(datetime.now().astimezone()):020d}.json")

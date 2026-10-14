@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import tempfile
 from collections.abc import Awaitable, Callable
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ import meridian
 from meridian.plugin.v1 import operations_pb2 as ops
 from meridian.suites import Recorder
 
-from oanda import synthetic
+from oanda import moments, synthetic
 from oanda.connection import Connection, Connections
 from oanda.custody import Syncer
 from oanda.kept import Kept
@@ -69,6 +70,7 @@ def placement(
     venue_order_id: str = "",
     limit: str | None = "1.08000",
     quote: str = "USD",
+    filled: bool = False,
 ) -> ops.Placement:
     held = ops.Placement(
         placement_id=pid,
@@ -79,7 +81,7 @@ def placement(
         venue_account_code=code,
         quantity=decimal(quantity),
         time_in_force=tif,
-        status=ops.PlacementStatus(state=state),
+        status=ops.PlacementStatus(state=ops.PLACEMENT_STATE_FILLED if filled else state),
         venue_order_id=venue_order_id,
     )
     if limit is not None:
@@ -122,6 +124,7 @@ def order_of(held: ops.Placement, **changes: Any) -> ops.Order:
         order_type=changes.pop("order_type", ops.ORDER_TYPE_LIMIT),
         time_in_force=changes.pop("time_in_force", held.time_in_force),
         dealt_currency=changes.pop("dealt_currency", ""),
+        quote_currency=changes.pop("quote_currency", ""),
         expire_date=changes.pop("expire_date", ""),
     )
     if held.HasField("limit_price"):
@@ -155,6 +158,23 @@ def computed(day: str = "2026-10-15") -> ops.ComputeDateResult:
     )
 
 
+def spot_of(params: ops.ComputeDateParams) -> ops.ComputeDateResult:
+    """The date read as core answers EUR/USD's spot inputs, stood in for:
+    the trade date through the 17:00 New York cut, two weekdays on (this
+    rig holds no holiday). The 13th, a Tuesday, before 17:00 spots on the
+    15th; after it, on the 16th."""
+    day = (
+        moments.trading_day(params.spot.at_ns)
+        if params.spot.at_ns
+        else date.fromisoformat(params.spot.trade_date)
+    )
+    counted = 0
+    while counted < 2:
+        day += timedelta(days=1)
+        counted += day.weekday() < 5
+    return computed(day.isoformat())
+
+
 def not_held() -> ops.ComputeDateResult:
     return ops.ComputeDateResult(outcome=ops.DATE_OUTCOME_RULE_NOT_HELD)
 
@@ -176,7 +196,7 @@ class TradeRig:
         recorder: Recorder,
         *,
         trading: bool = True,
-        dates: Callable[[Any], ops.ComputeDateResult] = lambda _: computed(),
+        dates: Callable[[Any], ops.ComputeDateResult] = spot_of,
         storage: Path | None = None,
     ) -> None:
         self.recorder = recorder
@@ -189,12 +209,14 @@ class TradeRig:
         self.orders: list[ops.Order] = []
         self.executions: list[ops.Execution] = []
         self.minted = 0
+        self.charged = 0
         self.kept: dict[str, Kept] = {}
         recorder.answer("ListOrders", self._listed)
         recorder.answer("ResolveInstrument", self._instrument)
         recorder.answer("ResolveIdentifier", resolved)
         recorder.answer("ComputeDate", dates)
         recorder.answer("ReportExecution", self._executed)
+        recorder.answer("ReportCharge", self._charged)
         self.trader = self.make()
 
     def connection(self) -> Connection:
@@ -210,7 +232,13 @@ class TradeRig:
     def make(self) -> Trader:
         """A trader as a process started now makes one: what it keeps read
         again from storage."""
-        empties: dict[str, Any] = {"sent": [], "cursor": {}, "trades": {}, "waiting": []}
+        empties: dict[str, Any] = {
+            "sent": [],
+            "cursor": {},
+            "trades": {},
+            "waiting": [],
+            "rolling": {},
+        }
         self.kept = {
             name: Kept(self.storage / "state" / f"{name}.json", empty)
             for name, empty in empties.items()
@@ -225,6 +253,7 @@ class TradeRig:
             cursor=self.kept["cursor"],
             trades=self.kept["trades"],
             waiting=self.kept["waiting"],
+            rolling=self.kept["rolling"],
         )
 
     def _instrument(self, params: ops.ResolveInstrumentParams) -> ops.ResolveInstrumentResult:
@@ -248,15 +277,39 @@ class TradeRig:
         )
 
     def _executed(self, params: ops.ReportExecutionParams) -> ops.ReportExecutionResult:
+        """The book's answer: the execution recorded, matched on a placement
+        and unmatched on none (contract v23)."""
         self.minted += 1
         held = ops.Execution(
             execution_id=f"EXE-{self.minted}",
             placement_id=params.placement_id,
             venue_execution_id=params.venue_execution_id,
+            venue_order_id=params.venue_order_id,
             quantity=params.quantity,
+            state=(
+                ops.EXECUTION_STATE_MATCHED
+                if params.placement_id
+                else ops.EXECUTION_STATE_UNMATCHED
+            ),
         )
         self.executions.append(held)
         return ops.ReportExecutionResult(execution=held)
+
+    def _charged(self, params: ops.ReportChargeParams) -> ops.ReportChargeResult:
+        """The book's answer: a charge on a placement minted its `CHG-` ID;
+        one on none kept unplaced (W11.12)."""
+        if not params.placement_id:
+            return ops.ReportChargeResult(
+                unplaced=ops.UnplacedFact(
+                    unplaced_id="UNP-1",
+                    reason=ops.UNPLACED_REASON_UNKNOWN_PLACEMENT,
+                    fact_kind="charge",
+                )
+            )
+        self.charged += 1
+        return ops.ReportChargeResult(
+            charge=ops.Charge(charge_id=f"CHG-{self.charged}", placement_id=params.placement_id)
+        )
 
     def holds(self, *placements: ops.Placement, **changes: Any) -> None:
         self.orders = [order_of(each, **changes) for each in placements]

@@ -143,6 +143,7 @@ async def run() -> None:
                 cursor=Kept(file_in(storage, "cursor.json"), {}),
                 trades=Kept(file_in(storage, "trades.json"), {}),
                 waiting=Kept(file_in(storage, "waiting.json"), []),
+                rolling=Kept(file_in(storage, "rolling.json"), {}),
                 scope=lambda: links.scope,
             )
         page = serve(plugin, Held(syncer, connections, links, wake, trader), port)

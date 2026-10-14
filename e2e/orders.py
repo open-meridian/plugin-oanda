@@ -1,4 +1,4 @@
-"""`make e2e`'s order path (contract v22), after the custody steps, in the
+"""`make e2e`'s order path (contract v23), after the custody steps, in the
 same harness: OANDA holding `custody` and `connectivity` in sample data, and
 the desk (e2e/desk.py) holding `portfolio`, `oms` and `ems`. SIMULATED
 ONLY: the synthetic OANDA (src/oanda/synthetic.py); no OANDA host, practice
@@ -9,23 +9,30 @@ or live, is reached.
    desk, the account mapped to the synthetic account's code; trading
    enabled on the connection under the connectivity role's admin (a new
    connection is read-only); releases not waiting for compliance.
-2. A buy of 10,000 EUR, limit 1.08000 USD: placed at OANDA as EUR_USD,
-   acknowledged with OANDA's order ID, and filled there. Its value date is
-   the date read's, the pair's spot date: the harness's platform holds no
-   spot-date rule, so the fill waits, never sent with a guessed date -- the
-   plugin says so, and the book holds no execution for it.
-3. A market order, which names no counter currency in contract v22: rejected
-   `unsupported`, nothing sent.
-4. A replace and a cancel the desk asks for: a working placement of
+2. A buy of 10,000 EUR, limit 1.08000 USD, naming USD as its quote
+   currency: placed at OANDA as EUR_USD, acknowledged with OANDA's order ID,
+   filled there, and recorded with the value date the date read gives (the
+   harness's EUR/USD spot-date rule), EUR pending to it.
+3. A market buy of 5,000 EUR, which names its pair by its quote currency
+   (contract v23): placed at OANDA as a market order and filled at once.
+4. An order taken in OANDA's own app, 2,000 EUR: its fill reported on no
+   placement, held unmatched in the book for the desk.
+5. OANDA's 17:00 New York roll: each trade's financing charged, and the
+   value-date roll moving EUR's pending 15,000 from the fills' value date to
+   the date read's answer for the roll's moment.
+6. The desk accepts the app's fill to a new order: the plugin charges its
+   financing again on the placement the accept made and reports a catch-up
+   roll, so all 17,000 pend to the rolled date.
+7. A replace and a cancel the desk asks for: a working placement of
    1,000,000 replaced at OANDA to a limit of 1.07500, OANDA's new order ID
    followed and the request applied; a replace to at the open, which OANDA
    has no time in force for, refused `unsupported`, the placement working
    on; then cancelled at OANDA, then in the book.
-5. A pause: a placement held back, queued; lifted, it is sent. A stop: OANDA
+8. A pause: a placement held back, queued; lifted, it is sent. A stop: OANDA
    cancels it at once, the cancel reported naming the stop; lifted again.
-6. OANDA restarted with a placement working: it reads the book again, sends
+9. OANDA restarted with a placement working: it reads the book again, sends
    no second order, and cancels it at OANDA when the desk asks.
-7. `store book` prints the orders and placements.
+10. `store book` prints the orders, placements and executions.
 
 Standard library only; the Makefile hands it the harness's compose command
 as its arguments.
@@ -35,6 +42,7 @@ import json
 import subprocess
 import sys
 import time
+from decimal import Decimal
 
 COMPOSE = sys.argv[1:]
 LOG = ".e2e/orders.log"
@@ -105,6 +113,34 @@ def placement_of(order, placement_id):
     raise Failed(f"{placement_id} is not on {order['order_id']}")
 
 
+def ask_oanda(request):
+    """Ask the synthetic OANDA for an order in its own app, or a roll: a
+    request file in its state directory, taken on its next step."""
+    compose(
+        "exec", "-T", "oanda", "python", "-c",
+        "from meridian import edge; from oanda.synthetic import ask;"
+        f"ask(edge.storage_dir(), {request!r})",
+    )
+
+
+def book():
+    return compose("run", "--rm", "-T", "store", "book").stdout.splitlines()
+
+
+def pending(lines, instrument):
+    """The account's pending long lines in an instrument, by value date."""
+    held = {}
+    for line in lines:
+        parts = line.split("|")
+        if parts[:4] == ["pending", "E2E Orders", instrument, "long"]:
+            held[parts[4]] = Decimal(parts[5])
+    return {day: quantity for day, quantity in held.items() if quantity}
+
+
+def entries(lines, kind):
+    return [line for line in lines if line.startswith(f"entry|E2E Orders|{kind}|")]
+
+
 def placed(account, instrument, quantity, key, extra=""):
     """An order proposed, released, claimed and placed at OANDA."""
     proposed = desk(
@@ -169,36 +205,83 @@ def run():
            "--expect", "Trading enabled on")
     runner("attribute", account, "waits=false", "note=No compliance plugin in this run.")
 
-    # 2. Placed, acknowledged and filled at OANDA; the value date waits.
-    order, placement = placed(account, eur, "10000", "buy-10000")
+    quoted = f"&quote_currency={usd}"
+
+    # 2. Placed, acknowledged, filled at OANDA, and recorded with its value date.
+    order, placement = placed(account, eur, "10000", "buy-10000", quoted)
     held = until(90, placement_state(account, order, placement, "PLACEMENT_STATE_WORKING",
                                      "PLACEMENT_STATE_FILLED"),
                  "step 2, never acknowledged")
     must(held["venue_order_id"], f"step 2, OANDA's order ID: {held}")
     until(60, lambda: [o for o in oanda_orders() if o[0] == placement and o[1] == "FILLED"],
           "step 2, the synthetic OANDA never filled it")
-    waiting = until(
-        90,
-        lambda: next((line for line in compose("logs", "--no-color", "oanda").stdout.splitlines()
-                      if f"{placement}: no value date yet for fill" in line), None),
-        "step 2, the fill neither reported nor said to wait for its value date",
-    )
-    book = compose("run", "--rm", "-T", "store", "book").stdout
-    executions = [line for line in book.splitlines() if line.startswith("execution|E2E Orders|")]
-    must(not executions, f"step 2, no execution with a guessed date: {executions}")
-    outcome = waiting.split("(")[-1].split(")")[0]
+    until(90, placement_state(account, order, placement, "PLACEMENT_STATE_FILLED"),
+          "step 2, the fill was not recorded with its value date")
+    first = until(30, lambda: pending(book(), eur), "step 2, EUR not pending to a value date")
+    must(list(first.values()) == [Decimal(10000)], f"step 2, 10,000 EUR pending: {first}")
+    (value_date,) = first
 
-    # 3. A market order: no counter currency in contract v22.
-    order3, placement3 = placed(account, eur, "10000", "market-10000", "&type=market&tif=fok")
-    rejected = until(60, placement_state(account, order3, placement3, "PLACEMENT_STATE_REJECTED"),
-                     "step 3, not rejected")
-    must(rejected["rejection"] == "REJECTION_REASON_UNSUPPORTED", f"step 3: {rejected}")
-    must(not sent_once(placement3), "step 3, nothing sent to OANDA")
+    # 3. A market order, naming its quote currency: sent and filled at once.
+    order3, placement3 = placed(account, eur, "5000", "market-5000",
+                                f"{quoted}&type=market&tif=fok")
+    until(60, placement_state(account, order3, placement3, "PLACEMENT_STATE_FILLED"),
+          "step 3, the market order was not filled")
+    must(len(sent_once(placement3)) == 1, "step 3, sent to OANDA once")
+    def fifteen_pending():
+        held = pending(book(), eur)
+        return held if held.get(value_date) == 15000 else None
 
-    # 4. A replace, a replace not offered, and a cancel the desk asks for.
-    order4, placement4 = placed(account, eur, WORKS, "replace-1m")
+    both = until(30, fifteen_pending, "step 3, EUR's 15,000 not pending to the value date")
+
+    # 4. An order taken in OANDA's own app: its fill on no placement.
+    ask_oanda({"order": {"instrument": "EUR_USD", "units": "2000"}})
+
+    def unmatched():
+        held = desk("write", f"/unmatched?account={account}")["executions"]
+        return held or None
+
+    (outside,) = until(90, unmatched, "step 4, the app's fill was not reported on no placement")
+    must(outside["instrument_id"] == eur and outside["side"] == "SIDE_BUY"
+         and Decimal(outside["quantity"]) == 2000 and outside["venue_order_id"],
+         f"step 4, the app's fill: {outside}")
+    must(pending(book(), eur) == both, "step 4, an unmatched fill moves nothing")
+
+    # 5. OANDA's 17:00 New York roll.
+    ask_oanda({"roll": True})
+
+    def rolled():
+        lines = book()
+        held = pending(lines, eur)
+        return (held, lines) if entries(lines, "value-date-rolled") and value_date not in held \
+            else None
+
+    after, lines = until(90, rolled, "step 5, the roll did not move EUR's pending lines")
+    must(len(after) == 1 and list(after.values()) == [Decimal(15000)],
+         f"step 5, EUR's 15,000 rolled to one later date: {after}")
+    (rolled_to,) = after
+    must(rolled_to > value_date, f"step 5, rolled forward: {value_date} to {rolled_to}")
+
+    # 6. The desk accepts the app's fill: charged again, and caught up.
+    desk("write", f"/accept?executions={outside['execution_id']}")
+
+    def caught_up():
+        lines = book()
+        held = pending(lines, eur)
+        done = held == {rolled_to: Decimal(17000)} and len(entries(lines, "value-date-rolled")) == 2
+        return lines if done else None
+
+    lines = until(90, caught_up, "step 6, the accepted fill was not caught up to the rolled date")
+    must(desk("write", f"/unmatched?account={account}")["executions"] == [],
+         "step 6, nothing left unmatched")
+    accepted = [o for o in desk("write", f"/orders?account={account}")["orders"]
+                if any(p["venue_order_id"] == outside["venue_order_id"] for p in o["placements"])]
+    must(accepted and accepted[0]["state"] == "ORDER_STATE_FILLED",
+         f"step 6, the accept made a filled order: {accepted}")
+
+    # 7. A replace, a replace not offered, and a cancel the desk asks for.
+    order4, placement4 = placed(account, eur, WORKS, "replace-1m", quoted)
     working = until(60, placement_state(account, order4, placement4, "PLACEMENT_STATE_WORKING"),
-                    "step 4, not working")
+                    "step 7, not working")
     first_id = working["venue_order_id"]
     desk("write", f"/replace?placement={placement4}&limit=1.07500")
 
@@ -207,8 +290,8 @@ def run():
         done = held["changes"] == [["PLACEMENT_CHANGE_KIND_REPLACE", "CHANGE_REQUEST_OUTCOME_APPLIED"]]
         return held if done else None
 
-    held4 = until(60, replaced, "step 4, the replace was not applied")
-    must(held4["venue_order_id"] not in ("", first_id), f"step 4, OANDA's new order: {held4}")
+    held4 = until(60, replaced, "step 7, the replace was not applied")
+    must(held4["venue_order_id"] not in ("", first_id), f"step 7, OANDA's new order: {held4}")
     desk("write", f"/replace?placement={placement4}&tif=opg")
 
     def refused():
@@ -216,53 +299,59 @@ def run():
         last = held["changes"][-1:] == [["PLACEMENT_CHANGE_KIND_REPLACE", "CHANGE_REQUEST_OUTCOME_REJECTED"]]
         return held if last and held["state"] == "PLACEMENT_STATE_WORKING" else None
 
-    until(60, refused, "step 4, the replace not offered was not refused, working on")
+    until(60, refused, "step 7, the replace not offered was not refused, working on")
     desk("write", f"/cancel?placement={placement4}")
     until(60, placement_state(account, order4, placement4, "PLACEMENT_STATE_CANCELLED"),
-          "step 4, not cancelled")
+          "step 7, not cancelled")
 
-    # 5. A pause, then a stop.
+    # 8. A pause, then a stop.
     runner("instruction", "pause", "--plugin", "oanda", "note=Hold OANDA's sends.")
     time.sleep(3)
-    order5, placement5 = placed(account, eur, WORKS, "paused-1m")
+    order5, placement5 = placed(account, eur, WORKS, "paused-1m", quoted)
     time.sleep(6)
     held5 = placement_of(order_of(account, order5), placement5)
-    must(held5["state"] == "PLACEMENT_STATE_QUEUED", f"step 5, held under the pause: {held5}")
-    must(not sent_once(placement5), "step 5, nothing sent to OANDA under the pause")
+    must(held5["state"] == "PLACEMENT_STATE_QUEUED", f"step 8, held under the pause: {held5}")
+    must(not sent_once(placement5), "step 8, nothing sent to OANDA under the pause")
     runner("instruction", "active", "--plugin", "oanda", "note=Resume.")
     until(90, placement_state(account, order5, placement5, "PLACEMENT_STATE_WORKING"),
-          "step 5, the held placement was not sent once the pause lifted")
+          "step 8, the held placement was not sent once the pause lifted")
     runner("instruction", "stop", "--plugin", "oanda", "note=Halt OANDA; cancel its work.")
     until(60, placement_state(account, order5, placement5, "PLACEMENT_STATE_CANCELLED"),
-          "step 5, the stop's cancel was not recorded")
+          "step 8, the stop's cancel was not recorded")
     runner("instruction", "active", "--plugin", "oanda", "note=Resume.")
 
-    # 6. Restarted with a placement working.
-    order7, placement7 = placed(account, eur, WORKS, "restart-1m")
+    # 9. Restarted with a placement working.
+    order7, placement7 = placed(account, eur, WORKS, "restart-1m", quoted)
     until(60, placement_state(account, order7, placement7, "PLACEMENT_STATE_WORKING"),
-          "step 6, not working before the restart")
+          "step 9, not working before the restart")
     compose("up", "-d", "--no-deps", "--force-recreate", "oanda")
     runner("ready", "--instance", "oanda")
     time.sleep(8)
-    must(len(sent_once(placement7)) == 1, "step 6, a second order sent after the restart")
+    must(len(sent_once(placement7)) == 1, "step 9, a second order sent after the restart")
     desk("write", f"/cancel?placement={placement7}")
     until(90, placement_state(account, order7, placement7, "PLACEMENT_STATE_CANCELLED"),
-          "step 6, the restarted plugin did not cancel its order at OANDA")
+          "step 9, the restarted plugin did not cancel its order at OANDA")
 
-    # 7. The book.
-    book = compose("run", "--rm", "-T", "store", "book").stdout
-    for wanted in ("order|E2E Orders|", "placement|E2E Orders|"):
-        must(wanted in book, f"step 7, store book prints {wanted!r}")
+    # 10. The book.
+    lines = book()
+    for wanted in ("order|E2E Orders|", "placement|E2E Orders|", "execution|E2E Orders|"):
+        must(any(line.startswith(wanted) for line in lines), f"step 10, store book prints {wanted!r}")
+    executions = [line for line in lines if line.startswith("execution|E2E Orders|")]
+    must(pending(lines, eur) == {rolled_to: Decimal(17000)},
+         f"step 10, EUR's 17,000 pending to {rolled_to}: {pending(lines, eur)}")
     print(
         f"orders OK: trading enabled on the connection; the desk's buy of 10,000 EUR at 1.08000 "
-        f"USD acknowledged ({held['venue_order_id']}) and filled at the synthetic OANDA as "
-        f"EUR_USD, its fill waiting for its value date (the harness's date read answered "
-        f"{outcome}: no spot-date rule held), no execution guessed; a market order rejected "
-        f"unsupported, naming no counter currency; a replace at OANDA to its new order "
-        f"({held4['venue_order_id']}), one not offered refused unsupported, and a cancel; a "
-        f"placement held under a pause and sent when it lifted; a stop's cancel at once; a "
-        f"restart sending no second order and cancelling at OANDA; {len(oanda_orders())} "
-        f"orders at the synthetic OANDA in all"
+        f"USD acknowledged ({held['venue_order_id']}), filled at the synthetic OANDA as EUR_USD "
+        f"and pending to its value date {value_date}, the date read's; a market buy of 5,000 "
+        f"naming USD as its quote currency filled at once; an order taken in OANDA's own app "
+        f"reported on no placement and held unmatched; OANDA's 17:00 New York roll charging "
+        f"each trade's financing and rolling EUR's 15,000 from {value_date} to {rolled_to}; the "
+        f"app's fill accepted by the desk, charged again on its placement and caught up to "
+        f"{rolled_to}, 17,000 pending there in {len(executions)} executions; a replace at OANDA "
+        f"to its new order ({held4['venue_order_id']}), one not offered refused unsupported, and "
+        f"a cancel; a placement held under a pause and sent when it lifted; a stop's cancel at "
+        f"once; a restart sending no second order and cancelling at OANDA; "
+        f"{len(oanda_orders())} orders at the synthetic OANDA in all"
     )
 
 

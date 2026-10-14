@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oanda"
-version = "0.1.0"
+version = "0.2.0"
 description = "Spot FX through OANDA's v20 API for an Open Meridian deployment: orders placed and filled, and the account's positions, cash and activity"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 # speaks one version of the contract, and a range would let a rebuild pick up
 # another. The Dockerfile's base is the same version. OANDA's v20 API is
 # reached with the standard library alone (src/oanda/venue.py).
-dependencies = ["open-meridian==0.26.0"]
+dependencies = ["open-meridian==0.27.0"]
 
 [project.urls]
 Repository = "https://github.com/open-meridian/plugin-oanda"
@@ -42,8 +42,9 @@ oanda = ["templates/*.html"]
 # connectivity, custody, data, ems, oms, operations, portfolio, reporting,
 # servicing, settlement, signal -- and its grants are theirs (ruled
 # 2026-10-13, the spot-FX plugin's Q1: `connectivity` and `custody` in the
-# first build, `data` later). `connectivity` (contract v22, W11): it places
-# the placements naming it at OANDA and reports what OANDA did with them.
+# first build, `data` later). `connectivity` (contract v23, W11): it places
+# the placements naming it at OANDA and reports what OANDA did with them,
+# each roll's value-date move, and the fills of orders taken outside it.
 # `custody` (W2): the account's sync status, statements and activity.
 roles = ["custody", "connectivity"]
 # Whether it serves a page through its sidecar.

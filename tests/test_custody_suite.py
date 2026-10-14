@@ -4,15 +4,12 @@ sidecar stood in for. SIMULATED ONLY: nothing reaches OANDA.
 
 Each case is mapped to what OANDA's v20 account states for it, in OANDA's
 own terms (`PRODUCERS`), or marked not presented with why where the suite
-lets a case be: a closed-list value OANDA never presents, or a case `about`
-a kind of work this plugin never does (`NOT_PRESENTED`).
-
-Seven required cases describe a securities custodian OANDA is not, and are
-held here as the suite's gap, each with why (`GAPS`), reported for the
-product owner rather than gamed: a money market fund counted in cash (two
-cases), a currency not stated, a split moving no cash, and a plan's own
-fund code (three cases). OANDA's v20 account holds currency positions only,
-always in a stated currency, and has no fund, split or plan code.
+lets a case be (`NOT_PRESENTED`): a closed-list value OANDA never presents,
+or a case `about` a kind of work this plugin never does or a thing OANDA's
+account never states -- from contract v23, sweep funds, splits, plan fund
+codes and currencies not stated. OANDA's v20 account holds currency
+positions only, always in a stated currency, and has no fund, split or plan
+code. Every required case is produced, and the suite passes.
 
 How the mapped ones are presented, where it is not plain:
 
@@ -71,18 +68,26 @@ NOT_PRESENTED = {
         "the legs' value dates are the pair's spot date, asked with the date read's spot "
         "inputs, never an instrument's settlement-date rule"
     ),
-}
-
-#: Required cases OANDA's account cannot present, and why: the suite's gap.
-GAPS = {
-    "cash-net-of-a-fund-counted-in-cash": "OANDA's account holds no money market fund",
-    "fund-larger-than-cash": "OANDA's account holds no money market fund",
-    "currency-not-stated": "OANDA states the currency of every position and amount",
-    "activity-moves-no-cash": "OANDA's account holds no security to split",
-    "activity-plan-code-not-linked": "OANDA has no plan's own fund code",
-    "activity-plan-code-linked-by-a-person": "OANDA has no plan's own fund code",
+    # Contract v23's `about` markers: what OANDA's account never states.
+    "cash-net-of-a-fund-counted-in-cash": (
+        "OANDA's account holds currencies only: no money market fund, swept or counted in "
+        "its cash"
+    ),
+    "fund-larger-than-cash": (
+        "OANDA's account holds currencies only: no money market fund, swept or counted in "
+        "its cash"
+    ),
+    "currency-not-stated": (
+        "OANDA states the currency of every position and amount: each leg is a currency, "
+        "and the account's own currency is stated on the account"
+    ),
+    "activity-moves-no-cash": "OANDA's account holds no security, so nothing splits",
+    "activity-plan-code-not-linked": "OANDA names no plan's own fund code: it has no plan",
+    "activity-plan-code-linked-by-a-person": (
+        "OANDA names no plan's own fund code: it has no plan"
+    ),
     "activity-re-resolved-when-a-plan-code-is-linked-later": (
-        "OANDA has no plan's own fund code"
+        "OANDA names no plan's own fund code: it has no plan"
     ),
 }
 
@@ -162,23 +167,20 @@ PRODUCERS: dict[str, Producer] = {
 }
 
 
-def test_every_case_is_mapped_said_not_presented_or_held_as_a_gap() -> None:
+def test_every_case_is_mapped_or_said_not_presented() -> None:
     every = set(names("custody"))
-    assert every == set(PRODUCERS) | set(NOT_PRESENTED) | set(GAPS)
+    assert every == set(PRODUCERS) | set(NOT_PRESENTED)
     assert not set(PRODUCERS) & set(NOT_PRESENTED)
-    assert not set(PRODUCERS) & set(GAPS)
     cases = {case.name: case for case in suite("custody").cases}
     assert all(cases[name].closed_list or cases[name].about for name in NOT_PRESENTED), (
         "a required case is never skipped"
     )
-    assert not any(cases[name].closed_list or cases[name].about for name in GAPS)
 
 
-def test_the_custody_suite_passes_but_for_its_gaps() -> None:
+def test_the_custody_suite_passes() -> None:
     report = run("custody", PRODUCERS, not_presented=NOT_PRESENTED, instance_id="oanda")
-    assert set(report.failures) == set(GAPS), report.failures
-    assert all("no producer" in why for why in report.failures.values())
-    assert len(report.passed_cases) == len(PRODUCERS)
+    assert report.passed, report.failures
+    assert sorted(report.passed_cases) == sorted(PRODUCERS)
     assert sorted(report.not_presented) == sorted(NOT_PRESENTED)
 
 

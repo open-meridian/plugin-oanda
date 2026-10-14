@@ -2,7 +2,7 @@
 
 A Meridian plugin, in Python on the open-meridian SDK, for spot FX through
 OANDA's v20 API: it places the placements naming it at OANDA and reports
-what OANDA did with them (`connectivity`, contract v22, W11), and reads the
+what OANDA did with them (`connectivity`, contract v23, W11), and reads the
 account its settings name as the custodian's view (`custody`, W2). It runs
 beside a sidecar in a Meridian deployment and reaches nothing else but that
 sidecar and OANDA: what it may publish and subscribe to comes from the roles
@@ -30,17 +30,23 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   windows; `kept.py` the small state files a restart reads again.
 - **A pair is not an instrument** (ruled 2026-10-13, Q6). An FX order is an
   order in the base currency's cash instrument, its limit or stop price in
-  the quote currency; the pair map (`pairs.py`) finds the instrument OANDA
-  quotes it as, only in that order, never turned round. Prices are OANDA's,
-  as it quotes them.
+  the quote currency, and from contract v23 it names the quote currency's
+  cash instrument (`Order.quote_currency`), so a market order names its pair
+  too; the pair map (`pairs.py`) finds the instrument OANDA quotes it as,
+  only in that order, never turned round. Prices are OANDA's, as it quotes
+  them.
 - **Rolling spot is two cash legs** (ruled 2026-10-13, Q3). A fill moves the
   book's two cash positions pending to the value date the date read gives;
   the statement shows each open trade as its two legs, pending to the value
   date the position now rolls to; each roll's financing is its own record
-  (a charge on the placement that opened the trade, and an interest
-  activity). Contract v22 has no act by which a plugin restates a pending
-  line's value date at a roll: that gap is the product owner's to rule, and
-  is never worked around here (never a correction superseding a fill).
+  (a charge of kind financing on the placement that opened the trade, and
+  an interest activity). At each roll the plugin reports a value-date roll
+  per pair (`ReportValueDateRoll`, contract v23, W11.25), its pending lines
+  moved from their date to the date read's answer for the roll's moment,
+  linked to the financing charges; a catch-up roll for a fill reported, or
+  accepted, after OANDA rolled it. Which dates its fills and rolls left in
+  the book is kept in storage (`rolling.json`). Never a correction
+  superseding a fill.
 - **Every value date comes from core** (`plugin.compute_date`, the spot
   inputs: the pair's two cash instruments and the fill's moment). OANDA's
   fill states none, so there is none beside it. Where the date read answers
@@ -55,8 +61,12 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   client ID, never resent; takes facts from the account's transactions (the
   stream, and `sinceid` on every poll, the cursor in storage); tells a cancel
   from a replace by the placement's change request; honours pause and stop;
-  publishes its catalogue, none while the connection is read-only; never
-  records an order or reports a fill no placement names (v23's). A new
+  publishes its catalogue, none while the connection is read-only, and no
+  execution acknowledgement; never records an order no placement names, but
+  reports that order's fills in a currency pair on no placement (contract
+  v23, W11.11), for the `ems` to accept or answer DK, and on an accept
+  charges its financing again on the new placement and catches its lines up
+  to OANDA's latest roll. A new
   connection is read-only until an admin of `connectivity` enables trading
   on it (`enable_trading`, Connections).
 - **Custody** (`custody.py`) reports the account, its sync status, its
@@ -65,9 +75,9 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   the first read in the process going back to the account's opening.
 - **The suites.** `tests/test_connectivity_suite.py` and
   `tests/test_custody_suite.py` map every case to OANDA's own terms, mark
-  those the suite lets be not presented with why, and hold the required
-  cases OANDA cannot present as the suite's gaps, each with why. Never game
-  a case.
+  those the suite lets be not presented with why, and assert the report
+  passes: no skip, no expected failure (meridian 0.1.43 refuses either).
+  Never game a case.
 - Run `make ci-local` before calling anything done; `meridian plugin check
   --verified --run-tests` after each change. Plugins are CI-first: a change
   lands on a branch and a pull request, merged when its CI is green.

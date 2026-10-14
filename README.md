@@ -3,9 +3,10 @@
 Spot FX through [OANDA's v20 API](https://developer.oanda.com/rest-live-v20/introduction/)
 for an Open Meridian deployment. The plugin holds two roles:
 
-- **`connectivity`** (contract v22): it places the placements that name it at
+- **`connectivity`** (contract v23): it places the placements that name it at
   OANDA and reports what OANDA did with them: acknowledgements, rejections,
-  fills and financing charges.
+  fills, financing charges and each daily value-date roll. It also reports
+  fills of orders taken in OANDA's own platform or app, on no placement.
 - **`custody`**: it reads the account its settings name as the custodian's
   view, covering the account, its sync status, a statement per read and its
   activity.
@@ -43,8 +44,9 @@ placement on it is rejected `unsupported`. The connection is the
 connection, which is read-only again.
 
 - **An FX order** is an order in the base currency's cash instrument, with
-  its limit or stop price in the quote currency. The plugin finds the pair
-  OANDA quotes in its pair map. It never turns a pair round: an order in
+  its limit or stop price in the quote currency. From contract v23 the order
+  names its quote currency (`quote_currency`), so a market order names its
+  pair too. The plugin finds the pair OANDA quotes in its pair map. It never turns a pair round: an order in
   USD priced in EUR is rejected, and the rejection names EUR_USD.
 - **What is sent**: OANDA's signed units of the base currency, the
   placement's ID as the order's client extension ID, and market (FOK, IOC),
@@ -56,8 +58,20 @@ connection, which is read-only again.
   `ComputeDate`). OANDA's fill states no value date. If the date read gives
   no answer, the fill waits and is asked about again on each poll. It is
   never sent with a guessed date.
-- **Financing** at each 17:00 New York roll is a charge on the placement
-  whose fill opened the trade.
+- **The roll.** At each 17:00 New York OANDA rolls every open trade to the
+  next spot date. The plugin reports each trade's financing as a charge of
+  kind financing on the placement whose fill opened it. It then reports a
+  value-date roll for each pair, moving the pending lines from their value
+  date to the date read's answer for the roll's moment, linked to those
+  charges. A fill reported after OANDA rolled it (one that waited for its
+  value date, or an accepted fill from OANDA's app) gets a catch-up roll.
+- **Commission** on a fill is a fee of kind commission.
+- **Orders taken outside the platform**, in OANDA's app or by OANDA itself
+  (a stop loss, a margin closeout), are never recorded as orders. Their
+  fills in a currency pair are reported on no placement, so the desk's
+  `ems` accepts them or answers them DK. Their financing is kept unplaced
+  until an accept, then charged again on the placement the accept made.
+  OANDA takes no execution acknowledgement, and the catalogue says so.
 - **An unanswered send** is resolved by asking OANDA for the order by its
   client ID. It is never sent again.
 - **Cancel and replace** are taken from the placement's change requests.
@@ -83,10 +97,15 @@ Activity is each transaction that moved cash, with these kinds:
 ## Proven against a released runtime
 
 `make e2e` runs the plugin on the synthetic OANDA, on the plugin harness that
-the Makefile pins beside core 8774368 (contract v22). It links the account
-through the plugin's own Account links form, holds the street to
-`e2e/expected.street` and `e2e/expected.activity`, and then runs the order
-path with a desk stand-in (`e2e/desk.py`, `e2e/orders.py`).
+the Makefile pins beside its core. It links the account through the plugin's
+own Account links form, holds the street to `e2e/expected.street` and
+`e2e/expected.activity`, and then runs the order path with a desk stand-in
+(`e2e/desk.py`, `e2e/orders.py`): a limit and a market order filled and
+pending to their value date, an order from OANDA's app reported on no
+placement, a roll, the desk's accept and its catch-up roll, a replace, a
+cancel, a pause, a stop and a restart. The order path needs contract v23's
+core: until core v23 is published, run it as
+`make e2e RUNTIME_IMAGE=... HARNESS_IMAGE=...` with a local build.
 
 **Safety:** tests and `make e2e` use the synthetic OANDA only. Any run on a
 real practice account is the product owner's, done by hand.
