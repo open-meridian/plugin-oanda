@@ -26,9 +26,10 @@ env:
   # The meridian whose rules the plugin is held to: the rules are compiled
   # into it. Move it deliberately, as the SDK's pin is moved, since a newer
   # one may hold a rule this plugin does not keep yet. `make check` reads it
-  # from here. 0.1.42 holds the suites of contract v22, whose calendar cases a
-  # plugin may name not presented with why.
-  MERIDIAN_VERSION: 0.1.42
+  # from here. 0.1.43 holds the suites of contract v23 and refuses a suite
+  # test that skips or expects a failure; red until it is released, and
+  # locally `make check MERIDIAN_BIN=...` tries a build of it.
+  MERIDIAN_VERSION: 0.1.43
 
 jobs:
   check:

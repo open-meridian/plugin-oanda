@@ -1,6 +1,7 @@
 """Small JSON files the plugin keeps in its storage, each written whole: what
 a restart must find again (the placements sent, the trading cursor, the
-trades a placement opened, the connections trading is enabled on). With no
+trades a placement opened, the value-date roll's state, the connections
+trading is enabled on). With no
 storage granted (a test) each lives in the process alone.
 
 They live under `<storage>/state/`, apart from the raw records' kinds

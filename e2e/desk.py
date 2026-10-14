@@ -1,7 +1,7 @@
 """The desk OANDA's `make e2e` places its orders from: a stand-in holding
 `portfolio`, `oms` and `ems` on the Python SDK, and `reporting` to name a
 currency's cash instrument by its ISO 4217 code (W3.1), run from the plugin's
-own image (e2e/plugin.yaml), after SnapTrade's. Each page answers JSON so
+own image (e2e/plugin.yaml), after SnapTrade's and Alpaca's. Each page answers JSON so
 the harness's runner drives it (`page --level ... PATH`), acting for the
 person the session's `Meridian-Caller` header names. SIMULATED ONLY: it
 reaches the deployment through its sidecar and nothing else, and the orders
@@ -9,10 +9,11 @@ go to the synthetic OANDA.
 
 A spot FX order is an order in the base currency's cash instrument, its
 limit in the quote currency (plans/an-order-reaches-a-venue-through-the-book,
-"Spot FX needs nothing more").
+"Spot FX needs nothing more"), and from contract v23 it names the quote
+currency's cash instrument (`quote_currency`, W11.1).
 
   /propose?account=&instrument=&quantity=[&tif=][&key=][&type=][&limit=][&quote=][&side=]
-                                          ProposeOrder: a limit buy, or as given
+          [&quote_currency=]              ProposeOrder: a limit buy, or as given
   /release?order=                         ReleaseOrder (oms)
   /claim?order=                           the claimed working condition (ems)
   /place?order=&quantity=&code=[&limit=][&quote=]  CreatePlacement at OANDA's instance
@@ -20,6 +21,8 @@ limit in the quote currency (plans/an-order-reaches-a-venue-through-the-book,
   /replace?placement=[&limit=][&quote=][&quantity=][&tif=]  a replace (ems)
   /map?account=&code=                     MapVenueAccount on OANDA (ems's admin)
   /orders?account=                        ListOrders, a line each
+  /unmatched?account=                     ListOrders' executions on no placement (contract v23)
+  /accept?executions=                     AcceptExecution to a new order (contract v23, ems)
   /resolve?iso4217=                       ResolveIdentifier: a currency's cash instrument
 """
 
@@ -120,6 +123,7 @@ class Desk:
                 limit_price=limit_of(query) if kind == "limit" else None,
                 time_in_force=tif,
                 expire_date="2026-12-31" if tif == ops.TIME_IN_FORCE_GOOD_TILL_DATE else "",
+                quote_currency=one(query, "quote_currency"),
                 idempotency_key=one(query, "key"),
                 acting_for=caller,
             )
@@ -195,6 +199,36 @@ class Desk:
         if path == "/orders":
             listed = await self.call("list_orders", account_id=one(query, "account"), page_size=500)
             return {"orders": [order_json(o) for o in listed.orders]}
+        if path == "/unmatched":
+            listed = await self.call(
+                "list_orders",
+                account_id=one(query, "account"),
+                execution_state=ops.EXECUTION_STATE_UNMATCHED,
+                page_size=500,
+            )
+            return {
+                "executions": [
+                    {
+                        "execution_id": e.execution_id,
+                        "venue_order_id": e.venue_order_id,
+                        "instrument_id": e.instrument_id,
+                        "side": ops.Side.Name(e.side),
+                        "quantity": str(as_decimal(e.quantity)),
+                        "settlement_date": e.computed_settlement_date or e.settlement_date,
+                    }
+                    for e in listed.executions
+                    if not e.placement_id and e.state == ops.EXECUTION_STATE_UNMATCHED
+                ]
+            }
+        if path == "/accept":
+            done = await self.call(
+                "accept_execution",
+                execution_ids=one(query, "executions").split(","),
+                new_order=ops.NewOrderFromExecutions(note="Taken in OANDA's own app"),
+                note="Ours: the account holder's order at OANDA",
+                acting_for=caller,
+            )
+            return {"accepted": len(one(query, "executions").split(",")), "said": str(done)[:200]}
         return {"page": "the desk"}
 
 

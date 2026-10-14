@@ -1,29 +1,33 @@
-"""The connectivity suite (contract v22): every case OANDA presents, from
+"""The connectivity suite (contract v23): every case OANDA presents, from
 this plugin's own Trader (trading.py) and the synthetic OANDA (synthetic.py),
 only the sidecar stood in for. SIMULATED ONLY: nothing reaches OANDA.
 
 Each case is mapped to what OANDA's v20 API answers for it, in OANDA's own
 terms (`PRODUCERS`), or marked not presented with why where the suite lets a
-case be (`NOT_PRESENTED`: a case `about` a kind of work or a field OANDA
-never states).
+case be (`NOT_PRESENTED`: a case `about` a kind of work, or a field, OANDA
+never presents). Every required case is produced, and the suite passes.
 
-Two required cases cannot be presented by a spot FX plugin on OANDA, and
-are held here as the suite's gap, each with why (`GAPS`), reported for the
-product owner rather than gamed:
+How the v23 cases are presented, where it is not plain:
 
-- `reports-a-fill-with-its-settlement-date` expects the fill's date read
-  with *settlement* inputs (an instrument's settlement-date rule). A spot FX
-  fill's value date is the pair's spot date, asked with the spot inputs
-  (W3.20, `SpotDateInputs`): the plugin asks that, and its ReportExecution
-  carries the computed date and its basis, which the case's second row
-  checks and passes.
-- `reports-a-bust`: OANDA's v20 transactions have no bust or trade
-  correction, so a fill is never taken back and there is nothing to report.
+- `reports-a-fill-with-its-settlement-date`: a spot FX fill's value date is
+  the pair's spot date, asked of the date read with the spot inputs (the
+  pair's two cash instruments and the fill's moment), one of the case's
+  ways (any_of).
+- `reports-a-value-date-roll`: a fill, then OANDA's 17:00 New York roll:
+  the trade's financing charged on its placement, then the roll from the
+  fill's value date to the date read's answer for the roll's moment.
+- `reports-a-charge`: the same roll's financing, a fee with no fill.
+- `reports-a-fill-on-no-placement` and
+  `re-reports-a-charge-on-the-accepted-placement`: an order taken in OANDA's
+  own app, its fill reported on no placement; rolled, its financing kept
+  unplaced; then accepted by its `ems`, the charge reported again on the
+  placement the accept created.
 """
 
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 
 from meridian.plugin.v1 import operations_pb2 as ops
 from meridian.suites import Recorder, names, run, suite
@@ -33,6 +37,15 @@ from oanda import synthetic
 from rigs import Producer, TradeRig, placement
 
 NOT_PRESENTED = {
+    "reports-a-bust": (
+        "OANDA's v20 transactions have no bust and no trade correction: a fill is never "
+        "taken back"
+    ),
+    "reports-a-later-fill-on-the-accepted-placement": (
+        "OANDA fills an order once: its ORDER_FILL is the order's one fillingTransactionID, "
+        "whole or (immediate or cancel) in part with the rest cancelled, so no later fill of "
+        "the same venue order follows an accept"
+    ),
     "reads-a-calendar": (
         "OANDA's fills take their value date from the date read (ComputeDate, the pair's "
         "spot-date rule); the plugin reads no calendar's days"
@@ -55,16 +68,6 @@ NOT_PRESENTED = {
         "it places what its ems released; whether releases wait for compliance changes "
         "nothing it sends"
     ),
-}
-
-#: Required cases a spot FX plugin on OANDA cannot present, and why: the
-#: suite's gap, reported (above).
-GAPS = {
-    "reports-a-fill-with-its-settlement-date": (
-        "a spot FX fill's value date is asked of the date read with the spot inputs (the "
-        "pair's spot-date rule), not the settlement inputs the case expects"
-    ),
-    "reports-a-bust": "OANDA's v20 transactions have no bust or correction",
 }
 
 
@@ -146,9 +149,9 @@ async def the_same_fill_twice(recorder: Recorder) -> None:
     await rig.trader.poll()
 
 
-async def charged(recorder: Recorder) -> None:
+async def rolled(recorder: Recorder) -> None:
     """Filled, then rolled at 17:00 New York: the trade's financing, a
-    charge on the placement that opened it."""
+    charge on the placement that opened it, and the value-date roll."""
     rig = TradeRig(recorder)
     await rig.started()
     held = placement()
@@ -157,6 +160,30 @@ async def charged(recorder: Recorder) -> None:
     await rig.trader.poll()
     rig.venue.roll()
     await rig.trader.poll()
+
+
+async def in_the_app(recorder: Recorder) -> None:
+    """An order taken in OANDA's own app, after the plugin started: its
+    fill reported on no placement."""
+    rig = TradeRig(recorder)
+    await rig.started()
+    rig.venue.in_the_app("EUR_USD", Decimal(2000))
+    await rig.trader.poll()
+
+
+async def accepted_after_a_roll(recorder: Recorder) -> None:
+    """An order taken in OANDA's own app, rolled before its ems accepted
+    it: the financing kept unplaced, then charged again on the placement
+    the accept created."""
+    rig = TradeRig(recorder)
+    await rig.started()
+    order_id = rig.venue.in_the_app("EUR_USD", Decimal(2000))
+    await rig.trader.poll()
+    rig.venue.roll()
+    await rig.trader.poll()
+    made = placement("PLC-01JAE0000000000000000ACC", venue_order_id=order_id, filled=True)
+    rig.holds(made)
+    await rig.hear(made)
 
 
 async def unknown_symbol(recorder: Recorder) -> None:
@@ -215,7 +242,10 @@ PRODUCERS: dict[str, Producer] = {
     "resolves-an-unanswered-send-by-asking": by_units(f"{synthetic.LOST}", 1),
     "reports-a-fill-with-its-settlement-date": filled,
     "derives-the-same-execution-id-twice": the_same_fill_twice,
-    "reports-a-charge": charged,
+    "reports-a-charge": rolled,
+    "reports-a-value-date-roll": rolled,
+    "reports-a-fill-on-no-placement": in_the_app,
+    "re-reports-a-charge-on-the-accepted-placement": accepted_after_a_roll,
     "sends-nothing-new-on-a-pause": paused,
     "cancels-at-the-venue-on-a-stop": stopped,
     "publishes-its-catalogue": started,
@@ -227,30 +257,25 @@ PRODUCERS: dict[str, Producer] = {
 }
 
 
-def test_every_case_is_mapped_said_not_presented_or_held_as_a_gap() -> None:
+def test_every_case_is_mapped_or_said_not_presented() -> None:
     every = set(names("connectivity"))
-    assert every == set(PRODUCERS) | set(NOT_PRESENTED) | {"reports-a-bust"}
+    assert every == set(PRODUCERS) | set(NOT_PRESENTED)
     assert not set(PRODUCERS) & set(NOT_PRESENTED)
     held = {case.name: case.about or case.about_field for case in suite("connectivity").cases}
     assert all(held[name] for name in NOT_PRESENTED), "a required case is never skipped"
-    assert not any(held[name] for name in GAPS), "a gap is a required case"
 
 
-def test_the_connectivity_suite_passes_but_for_its_two_gaps() -> None:
+def test_the_connectivity_suite_passes() -> None:
     report = run("connectivity", PRODUCERS, not_presented=NOT_PRESENTED, instance_id="oanda")
-    assert set(report.failures) == set(GAPS), report.failures
-    # The fill case fails on its date read's inputs alone: the spot inputs
-    # are asked, and the execution carries the computed date and basis.
-    assert "settlement" in report.failures["reports-a-fill-with-its-settlement-date"]
-    assert "expect[0]" in report.failures["reports-a-fill-with-its-settlement-date"]
-    assert "no producer" in report.failures["reports-a-bust"]
-    assert len(report.passed_cases) == 18
+    assert report.passed, report.failures
+    assert sorted(report.passed_cases) == sorted(PRODUCERS)
     assert sorted(report.not_presented) == sorted(NOT_PRESENTED)
 
 
-def test_the_fill_case_passes_its_execution_row() -> None:
-    """The fill case's second row -- the execution with its quantity, price,
-    computed date, basis and raw record -- holds."""
+def test_the_fill_case_asks_the_spot_inputs() -> None:
+    """The fill case: the date read asked with the pair's spot inputs, and
+    the execution with its quantity, price, computed date, basis and raw
+    record."""
     recorder = Recorder("oanda")
     asyncio.run(filled(recorder))
     (execution,) = recorder.on("ReportExecution")
