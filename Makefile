@@ -30,12 +30,12 @@ CLI_CONTEXT := $(if $(MERIDIAN_BIN),--build-context cli=$(MERIDIAN_BIN),)
 
 # The released runtime `make e2e` proves the plugin against, by tag and
 # digest, and core's plugin harness published with it, by the same commit's
-# tag and its digest: core 8774368, contract v22, as SnapTrade pins them.
+# tag and its digest: core 50d6f0a, contract v23, as published (chart 0.1.303).
 # Moved together by a deliberate commit. `make e2e RUNTIME_IMAGE=...:latest
 # HARNESS_IMAGE=...:latest` tries a newer core; e2e-latest.yaml does that
 # weekly.
-RUNTIME_IMAGE ?= ghcr.io/open-meridian/meridian-runtime:8774368@sha256:30bc55de3702ffa76b5a8e7c36cb0fe65aa819dd1b7d167cecdd5fe59540c5db
-HARNESS_IMAGE ?= ghcr.io/open-meridian/meridian-harness:8774368@sha256:c1db335cecdc42c3eed10e916e8c600483b73eef5830e100c35411653196a5ac
+RUNTIME_IMAGE ?= ghcr.io/open-meridian/meridian-runtime:50d6f0a@sha256:31752d45e262b4e87978e486f5e3cdd201fe14970bf1e681bfb9241731d0a053
+HARNESS_IMAGE ?= ghcr.io/open-meridian/meridian-harness:50d6f0a@sha256:00c4818b8c67218ecbe237f97e97b78cad3801477520ebbae80fe29332de4115
 # Its roles as pyproject.toml declares them, so the harness launches it as
 # `meridian plugin upload` would.
 ROLES := $(shell sed -n 's/^roles *= *\[\(.*\)\]/\1/p' pyproject.toml | tr -d ' ')
