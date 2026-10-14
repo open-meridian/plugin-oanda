@@ -122,6 +122,9 @@ class ConnectionRead(custody.ConnectionRead):
     environment: str = ""
     trading: bool = False
     trading_enabled_by: str = ""
+    # Where trading on this connection was last turned off by a switch away
+    # from it, when and why: a person enables it again on returning.
+    trading_turned_off: str = ""
     working: int = 0
     held: int = 0
     unknown: int = 0

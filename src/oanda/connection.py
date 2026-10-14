@@ -33,6 +33,16 @@ settings, or of the account chosen -- is a new connection, read-only again.
 Which connections trading is enabled on, by whom and when, is kept in the
 plugin's storage (`state/connections.json`), so a restart finds it.
 
+**Switching away turns trading off** (approved by the product owner,
+2026-10-14). When the connection in use changes -- by `choose_account`, or
+by the `account_id` or `environment` setting -- trading on the one left is
+turned off, and the change is recorded (`state/trading-off.json`): which
+connection, the one now in use, the change that caused it and who made it,
+when, and who had enabled it. Returning to it finds it read-only, and a
+person enables trading on it again: trading never comes back on by itself.
+The connection last in use is kept too (`state/in-use.json`), so a change
+made while the plugin was stopped is found when it starts.
+
 Sample data's connection is the synthetic OANDA (synthetic.py), whose
 accounts are picked from in the same way; an `account_id` setting there
 means the synthetic account, as before 0.3.0. Nothing in it reaches OANDA.
@@ -171,6 +181,10 @@ class Connections:
         self._make_venue = make_venue
         self._enabled = Kept(file_in(storage, "connections.json"), {})
         self._chosen = Kept(file_in(storage, "account.json"), {})
+        # The connection last in use, so a change found after a restart is
+        # still a change; and each time trading was turned off by one.
+        self._in_use = Kept(file_in(storage, "in-use.json"), {})
+        self._turned_off = Kept(file_in(storage, "trading-off.json"), [])
         self._synthetic: synthetic.SyntheticOanda | None = None
         self._real: tuple[tuple[str, str], Venue] | None = None
         self._listing: tuple[tuple[str, ...], Listing] | None = None
@@ -178,6 +192,7 @@ class Connections:
 
     def configure(self, config: Config) -> None:
         self.config = config
+        self._follow("", "")
 
     def _key(self) -> tuple[str, ...] | None:
         """What a listing was made for: the synthetic OANDA, or a token on a
@@ -310,6 +325,7 @@ class Connections:
                 "at": self._now().isoformat(),
             }
             self._chosen.save()
+        self._follow(f"choose_account by {by}", by)
         return ""
 
     def waiting(self) -> str:
@@ -351,6 +367,62 @@ class Connections:
             self._enabled.value[connection_id] = {"by": by, "at": self._now().isoformat()}
             self._enabled.save()
         return True
+
+    def _follow(self, chosen: str, by: str) -> None:
+        """Note the connection now in use. Where it is another than the one
+        last in use, trading on that one is turned off (approved by the
+        product owner, 2026-10-14): a person enables it again on returning
+        to it, so trading never comes back on by itself. The record names
+        the change that caused it: `chosen`, an admin's choose_account, by
+        the person; else the settings' change, whose author core's own
+        record of each settings change names."""
+        current = self.current
+        if current is None:
+            return
+        held = self._in_use.value
+        was = str(held.get("connection_id") or "")
+        if was == current.connection_id:
+            return
+        if was and was in self._enabled.value:
+            enabled = self._enabled.value.pop(was)
+            self._turned_off.value.append(
+                {
+                    "connection_id": was,
+                    "to": current.connection_id,
+                    "cause": chosen or self._settings_cause(held),
+                    "by": by,
+                    "at": self._now().isoformat(),
+                    "enabled_by": str(enabled.get("by", "")),
+                    "enabled_at": str(enabled.get("at", "")),
+                }
+            )
+            self._enabled.save()
+            self._turned_off.save()
+        self._in_use.value = {
+            "connection_id": current.connection_id,
+            "environment": current.environment,
+            "account_id": current.account_id,
+            "source": self.choice.source,
+        }
+        self._in_use.save()
+
+    def _settings_cause(self, held: dict[str, str]) -> str:
+        """Which settings change moved the connection, in words."""
+        before, now = str(held.get("environment", "")), self.environment
+        if before != now:
+            return f"the settings changed the environment from {before} to {now}"
+        choice = self.choice
+        if SETTING in (choice.source, held.get("source")):
+            return (
+                f"the account_id setting changed the account from {held.get('account_id', '')} "
+                f"to {choice.account_id}"
+            )
+        return f"the account changed from {held.get('account_id', '')} to {choice.account_id}"
+
+    def turned_off(self) -> list[dict[str, str]]:
+        """Each time trading was turned off by a change of connection, oldest
+        first."""
+        return [dict(each) for each in self._turned_off.value if isinstance(each, dict)]
 
     def trading_on(self, connection_id: str) -> bool:
         """Whether trading is enabled on the connection named."""

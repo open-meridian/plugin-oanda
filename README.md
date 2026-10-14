@@ -66,7 +66,13 @@ enables trading on it under Connections, "Enable trading". Until then, every
 placement on it is rejected `unsupported`. The connection is the
 `environment` together with the account (chosen on Connections, or named by
 `account_id`), so changing either makes a new connection, which is
-read-only again.
+read-only again. Switching away from a connection also turns trading off
+on it, whether by choosing another account on Connections or by changing
+the `account_id` or `environment` setting. Returning to it finds it
+read-only, and a person enables trading on it again: trading never comes
+back on by itself. Each time this happens it is recorded in the plugin's
+storage, with the change that caused it, who made it and when. Connections
+and `read_connections` say so for the connection in use.
 
 - **An FX order** is an order in the base currency's cash instrument, with
   its limit or stop price in the quote currency. From contract v23 the order

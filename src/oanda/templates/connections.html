@@ -16,7 +16,7 @@
 {% endblock %}
 {% block vendor_columns %}
 {% if row is none %}<th>Trading</th><th class="wide-only">Placements</th><th></th>
-{%- else %}<td>{% if row.trading %}{{ kit.badge("Enabled", "good") }}{% else %}{{ kit.badge("Read-only", "warn") }}{% endif %}</td><td class="wide-only">{{ row.working }} working, {{ row.held }} held, {{ row.unknown }} asked about, {{ row.waiting_for_a_value_date }} waiting for a value date</td>
+{%- else %}<td>{% if row.trading %}{{ kit.badge("Enabled", "good") }}{% else %}{{ kit.badge("Read-only", "warn") }}{% if row.trading_turned_off %} <span class="hint" title="{{ row.trading_turned_off }}">Turned off on a switch</span>{% endif %}{% endif %}</td><td class="wide-only">{{ row.working }} working, {{ row.held }} held, {{ row.unknown }} asked about, {{ row.waiting_for_a_value_date }} waiting for a value date</td>
 <td>{%- if not row.trading and caller.level_for("connectivity") == admin_level -%}
 {%- if "enable_trading" in caller.second_pair_of_eyes %}{{ kit.action(paths.enable_trading, "Prepare", fields={"connection_id": row.connection_id, "prepare": "1"}, label="Prepare: enable trading on " ~ row.connection) }}
 {%- else %}{{ kit.action(paths.enable_trading, "Enable trading", fields={"connection_id": row.connection_id}, label="Enable trading on " ~ row.connection) }}{% endif -%}
@@ -30,7 +30,7 @@
 {% if data.listing_error %}<div class="notice warn" role="status">The accounts were not listed again: {{ data.listing_error }}.</div>
 {%- elif data.account_id and data.listed and not data.reached|selectattr("account_id", "equalto", data.account_id)|list %}<div class="notice warn" role="status">The account in use, {{ data.account_id }}, is not one the token reaches now.</div>{% endif %}
 {% if data.account_from == "setting" %}<p class="hint">The Account ID setting names the account, <code>{{ data.account_id }}</code>. To choose it here instead, clear that setting in Settings.</p>
-{%- elif data.account_id %}<p class="hint">In use: <code>{{ data.account_id }}</code>{% if data.account_chosen_by %}, chosen by {{ data.account_chosen_by }}{% endif %}. Another account is a new connection, read-only until trading is enabled on it.</p>
+{%- elif data.account_id %}<p class="hint">In use: <code>{{ data.account_id }}</code>{% if data.account_chosen_by %}, chosen by {{ data.account_chosen_by }}{% endif %}. Another account is a new connection, read-only until trading is enabled on it, and choosing it turns trading off on this one: coming back to it, trading is enabled again by a person.</p>
 {%- elif data.preselected %}<p class="hint">The token reaches one account this plugin can use. It is preselected: confirm it with "Use this account".</p>{% endif %}
 <table class="one-line"><thead><tr><th>Account the token reaches</th><th>Can be used</th></tr></thead><tbody>
 {% for each in data.reached %}

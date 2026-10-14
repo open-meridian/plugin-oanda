@@ -26,6 +26,17 @@ the token reaches, instead of typing its ID (approved by the product owner,
 - The connection is still the environment and the account: choosing a
   different account makes a new connection, read-only until trading is
   enabled on it.
+- Switching away turns trading off (approved by the product owner,
+  2026-10-14). When the connection in use changes, by `choose_account` or
+  by the `account_id` or `environment` setting, trading on the one left is
+  turned off. The change is recorded in the plugin's storage
+  (`state/trading-off.json`): which connection, the one now in use, the
+  change that caused it and who made it, when, and who had enabled it.
+  Returning to it finds it read-only, and a person enables trading again.
+  The connection last in use is kept (`state/in-use.json`), so a settings
+  change made while the plugin was stopped is caught when it starts.
+  `read_connections` answers `trading_turned_off` for the connection in
+  use, and Connections marks it.
 - `read_connections` answers the accounts the token reaches (`reached`),
   the one in use and where it came from, and the one preselected.
 - Until an account is chosen, the plugin reports itself waiting for it.

@@ -217,6 +217,68 @@ def test_a_change_of_choice_is_a_new_read_only_connection() -> None:
     assert second.connection_id != first.connection_id and not second.trading
 
 
+def test_returning_to_a_chosen_account_finds_it_read_only() -> None:
+    """A enabled, then B chosen, then A again: A's trading was turned off
+    when it was left, recorded naming the choice that caused it, and stays
+    off until a person enables it again."""
+    made = connections(Listed([A, B]))
+    asyncio.run(made.discover())
+    made.choose(A, "Ada Admin")
+    assert made.enable_trading(f"{PRACTICE}:{A}", "Ada Admin")
+    made.choose(B, "Bo Admin")
+    (off,) = made.turned_off()
+    assert off["connection_id"] == f"{PRACTICE}:{A}" and off["to"] == f"{PRACTICE}:{B}"
+    assert off["cause"] == "choose_account by Bo Admin" and off["by"] == "Bo Admin"
+    assert off["enabled_by"] == "Ada Admin" and off["at"]
+    made.choose(A, "Bo Admin")
+    back = made.current
+    assert back is not None and back.account_id == A and not back.trading
+    assert made.enable_trading(back.connection_id, "Bo Admin")
+    assert made.current is not None and made.current.trading
+
+
+def test_returning_through_the_settings_finds_it_read_only() -> None:
+    """The same through the account_id setting, and through the environment,
+    and a change made while the plugin was stopped found when it starts."""
+    storage = Path(tempfile.mkdtemp())
+    made = connections(Listed([A, B]), storage=storage, settings={ACCOUNT_ID: A})
+    assert made.enable_trading(f"{PRACTICE}:{A}", "Ada Admin")
+    made.configure(config_from({TOKEN: NOT_A_TOKEN, ENVIRONMENT: PRACTICE, ACCOUNT_ID: B}))
+    (off,) = made.turned_off()
+    assert off["connection_id"] == f"{PRACTICE}:{A}" and off["by"] == ""
+    assert off["cause"] == f"the account_id setting changed the account from {A} to {B}"
+    made.configure(config_from({TOKEN: NOT_A_TOKEN, ENVIRONMENT: PRACTICE, ACCOUNT_ID: A}))
+    assert made.current is not None and not made.current.trading
+
+    # The environment: practice:A enabled, live:A, then practice:A again.
+    assert made.enable_trading(f"{PRACTICE}:{A}", "Ada Admin")
+    made.configure(config_from({TOKEN: NOT_A_TOKEN, ENVIRONMENT: LIVE, ACCOUNT_ID: A}))
+    assert made.turned_off()[-1]["cause"] == (
+        f"the settings changed the environment from {PRACTICE} to {LIVE}"
+    )
+    made.configure(config_from({TOKEN: NOT_A_TOKEN, ENVIRONMENT: PRACTICE, ACCOUNT_ID: A}))
+    assert made.current is not None and not made.current.trading
+
+    # Enabled, then the plugin stopped, the setting changed and started again.
+    assert made.enable_trading(f"{PRACTICE}:{A}", "Ada Admin")
+    restarted = connections(Listed([A, B]), storage=storage, settings={ACCOUNT_ID: B})
+    assert restarted.turned_off()[-1]["connection_id"] == f"{PRACTICE}:{A}"
+    restarted.configure(config_from({TOKEN: NOT_A_TOKEN, ENVIRONMENT: PRACTICE, ACCOUNT_ID: A}))
+    assert restarted.current is not None and not restarted.current.trading
+
+
+def test_the_same_connection_again_keeps_its_trading() -> None:
+    """A settings delivery that leaves the connection as it was, or one with
+    no connection for a while, turns nothing off."""
+    made = connections(Listed([A]), settings={ACCOUNT_ID: A})
+    assert made.enable_trading(f"{PRACTICE}:{A}", "Ada Admin")
+    made.configure(config_from({TOKEN: NOT_A_TOKEN, ENVIRONMENT: PRACTICE, ACCOUNT_ID: A}))
+    made.configure(config_from({ACCOUNT_ID: A}))
+    made.configure(config_from({TOKEN: NOT_A_TOKEN, ENVIRONMENT: PRACTICE, ACCOUNT_ID: A}))
+    assert made.turned_off() == []
+    assert made.current is not None and made.current.trading
+
+
 def test_the_choice_survives_a_restart_and_is_per_environment() -> None:
     storage = Path(tempfile.mkdtemp())
     made = connections(Listed([A]), storage=storage)
@@ -354,3 +416,20 @@ def test_no_choice_is_offered_while_the_setting_names_the_account() -> None:
     assert refused.outcome == "refused" and refused.json["reason"] == "failed_precondition"
     read = client.call_tool("read_connections", level="admin")
     assert read.data["account_id"] == A and read.data["account_from"] == "setting"
+
+
+def test_connections_say_why_a_returned_to_connection_is_read_only() -> None:
+    made = connections(Listed([A, B]))
+    client = held(made)
+    for account in (A, B):
+        done = client.call_tool("choose_account", {"account_id": account}, level="admin")
+        assert done.outcome == "made"
+        if account == A:
+            assert made.enable_trading(f"{PRACTICE}:{A}", "Ada Admin")
+    back = client.call_tool("choose_account", {"account_id": A}, level="admin")
+    assert back.data["trading"] is False and "read-only" in back.data["said"]
+    (connection,) = client.call_tool("read_connections", level="admin").data["connections"]
+    assert connection["trading"] is False
+    assert connection["trading_turned_off"].startswith("Trading was turned off here at ")
+    assert "choose_account by" in connection["trading_turned_off"]
+    assert "Turned off on a switch" in client.get("/admin/connections", "admin").body

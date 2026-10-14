@@ -177,6 +177,9 @@ def _connections_read() -> records.ConnectionsRead:
                 environment=connection.environment,
                 trading=connection.trading,
                 trading_enabled_by=by,
+                trading_turned_off=""
+                if connection.trading
+                else _turned_off(connection_id=connection.connection_id),
                 working=shown.working if shown else 0,
                 held=shown.held if shown else 0,
                 unknown=shown.unknown if shown else 0,
@@ -197,6 +200,16 @@ def _connections_read() -> records.ConnectionsRead:
         account_chosen_by=choice.by,
         preselected="" if choice.account_id else listing.preselected,
     )
+
+
+def _turned_off(connection_id: str) -> str:
+    """When and why trading was last turned off on the connection by a
+    switch away from it, or ""."""
+    off = [e for e in _now().connections.turned_off() if e["connection_id"] == connection_id]
+    if not off:
+        return ""
+    last = off[-1]
+    return f"Trading was turned off here at {last['at']}, when {last['cause']}."
 
 
 def _may_choose(request: meridian.Request) -> bool:
@@ -407,7 +420,8 @@ def _asked_account(request: meridian.Request) -> str:
         "trades on it. Never made for you: an account the token alone reaches is "
         "preselected, not chosen until this. A v1 account cannot be chosen, nor any while "
         "the Account ID setting names one. A change of account is a new connection, "
-        "read-only until trading is enabled on it. Needs admin on custody and connectivity."
+        "read-only until trading is enabled on it, and turns trading off on the one left, "
+        "so returning to it finds it read-only. Needs admin on custody and connectivity."
     ),
 )
 async def choose_account(request: meridian.Request) -> meridian.Response:
