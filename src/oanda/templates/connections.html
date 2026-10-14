@@ -1,11 +1,17 @@
 {#- Connections, at admin: the custody role's page with OANDA's connection,
     its trading, and "Enable trading" for an admin of connectivity (a new
-    connection is read-only). No account's data. -#}
+    connection is read-only); then the Account section: the v20 accounts the
+    token reaches, a v1 account unusable with why, and for an admin of each
+    of the plugin's roles "Use this account" (choose_account), the only
+    usable account preselected and never chosen until sent. None is offered
+    while the Account ID setting names the account. No account's data. -#}
 {% extends "meridian/roles/custody/connections.html" %}
 {% import "meridian/kit.html" as kit %}
+{% import "meridian/roles/_rows.html" as om %}
 {% block vendor_notices %}
 {% if notice %}{{ kit.notice(notice) }}{% endif %}
-{% if waiting %}<div class="notice warn" role="status">Waiting for its settings: {{ waiting|join(", ") }}.</div>{% endif %}
+{% if waiting %}<div class="notice warn" role="status">Waiting for its settings: {{ waiting|join(", ") }}.</div>
+{%- elif not data.account_id and data.listed %}<div class="notice warn" role="status">Waiting for the account: choose it under Account below. Nothing is read or traded until an admin does.</div>{% endif %}
 {% if data.mode %}<p class="hint">Reaching: {{ data.mode }}.</p>{% endif %}
 {% endblock %}
 {% block vendor_columns %}
@@ -16,4 +22,33 @@
 {%- else %}{{ kit.action(paths.enable_trading, "Enable trading", fields={"connection_id": row.connection_id}, label="Enable trading on " ~ row.connection) }}{% endif -%}
 {%- endif -%}</td>
 {%- endif %}
+{% endblock %}
+{% block vendor_sections %}
+{% if data.listed or data.account_id %}
+<section class="panel" id="account">
+<div class="section-head"><h2>Account</h2></div>
+{% if data.listing_error %}<div class="notice warn" role="status">The accounts were not listed again: {{ data.listing_error }}.</div>
+{%- elif data.account_id and data.listed and not data.reached|selectattr("account_id", "equalto", data.account_id)|list %}<div class="notice warn" role="status">The account in use, {{ data.account_id }}, is not one the token reaches now.</div>{% endif %}
+{% if data.account_from == "setting" %}<p class="hint">The Account ID setting names the account, <code>{{ data.account_id }}</code>. To choose it here instead, clear that setting in Settings.</p>
+{%- elif data.account_id %}<p class="hint">In use: <code>{{ data.account_id }}</code>{% if data.account_chosen_by %}, chosen by {{ data.account_chosen_by }}{% endif %}. Another account is a new connection, read-only until trading is enabled on it.</p>
+{%- elif data.preselected %}<p class="hint">The token reaches one account this plugin can use. It is preselected: confirm it with "Use this account".</p>{% endif %}
+<table class="one-line"><thead><tr><th>Account the token reaches</th><th>Can be used</th></tr></thead><tbody>
+{% for each in data.reached %}
+<tr data-account="{{ each.account_id }}"><td><code>{{ each.account_id }}</code>{% if each.account_id == data.account_id %} {{ kit.badge("In use", "good") }}{% endif %}</td>
+<td>{% if each.usable %}Yes{% else %}{{ kit.badge("Unusable", "bad") }} <span class="hint">{{ each.reason }}</span>{% endif %}</td></tr>
+{% else %}
+<tr><td colspan="2">The token reaches no v20 account.</td></tr>
+{% endfor %}
+</tbody></table>
+{% if data.account_from != "setting" and usable and may_choose %}
+{{ om.second_pair_of_eyes("choose_account", caller) }}
+<form method="post" action="{{ paths.choose_account }}">{{ csrf_input }}<div class="field-row"><label class="field"><span>The account to use</span><select name="account_id" required>
+{%- if not selected %}<option value="">Choose an account</option>{% endif %}
+{%- for each in usable %}<option value="{{ each.account_id }}"{% if each.account_id == selected %} selected{% endif %}>{{ each.account_id }}</option>{% endfor -%}
+</select></label>
+{%- if "choose_account" in caller.second_pair_of_eyes %}<button name="prepare" value="1">Prepare</button>
+{%- else %}<button class="primary">Use this account</button>{% endif %}</div></form>
+{% endif %}
+</section>
+{% endif %}
 {% endblock %}

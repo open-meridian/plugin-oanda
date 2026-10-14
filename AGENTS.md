@@ -20,14 +20,17 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
 
 - `src/oanda/__main__.py` connects to the sidecar, declares the settings
   (`settings.py`: `environment` first, `practice` or `live`, then `token`,
-  secret, and `account_id`, the names approved 2026-10-13) and the pages
-  (`page.py`), and runs the custody reads (`custody.py`) and the trading
-  work (`trading.py`). `venue.py` is OANDA's v20 REST and stream behind a
-  small interface, the one module speaking HTTP to OANDA, standard library
-  only; `synthetic.py` stands in for it. `connection.py` is the connection
-  the settings name and whether trading is enabled on it; `pairs.py` the
-  pair map; `raw.py` the raw records; `archive.py` moves them past their
-  windows; `kept.py` the small state files a restart reads again.
+  secret, and `account_id`, the names approved 2026-10-13; `account_id`
+  optional from 0.3.0) and the pages (`page.py`), and runs the custody reads
+  (`custody.py`) and the trading work (`trading.py`). `venue.py` is OANDA's
+  v20 REST and stream behind a small interface, the one module speaking HTTP
+  to OANDA, standard library only; `synthetic.py` stands in for it.
+  `connection.py` is the connection -- the environment and the account, the
+  one an admin chose on Connections from those the token reaches
+  (`choose_account`, approved 2026-10-14), or the one `account_id` names --
+  and whether trading is enabled on it; `pairs.py` the pair map; `raw.py`
+  the raw records; `archive.py` moves them past their windows; `kept.py` the
+  small state files a restart reads again.
 - **A pair is not an instrument** (ruled 2026-10-13, Q6). An FX order is an
   order in the base currency's cash instrument, its limit or stop price in
   the quote currency, and from contract v23 it names the quote currency's

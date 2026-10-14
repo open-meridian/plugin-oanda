@@ -121,8 +121,10 @@ image:
 	@echo "image OK: $(IMAGE) on $(BASE), $$(docker image inspect -f '{{.Size}}' $(IMAGE) | awk '{printf "%.0f MB", $$1/1e6}')"
 
 # The plugin, in sample data and with no token, on the plugin harness
-# published with the runtime it pins: e2e/custody.py links the synthetic
-# OANDA account through the plugin's own Account links form and holds the
+# published with the runtime it pins: e2e/custody.py chooses the synthetic
+# OANDA account on Connections from those its token reaches (preselected,
+# confirmed by the admin; the v1 account unusable), links it through the
+# plugin's own Account links form and holds the
 # street's statement and activity to e2e/expected.street and
 # e2e/expected.activity, a row's raw record followed, and a new container's
 # backfill recording nothing twice; then e2e/orders.py runs the order path

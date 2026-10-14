@@ -37,3 +37,15 @@ def test_an_unknown_environment_is_practice() -> None:
 
 def test_sample_data_needs_no_token() -> None:
     assert config_from({SYNTHETIC: True}).ready
+
+
+def test_the_account_id_is_optional_from_0_3_0() -> None:
+    """The token alone is a whole credential; the account is chosen on
+    Connections, or named by `account_id` where it is given."""
+    by_name = {setting.name: setting for setting in DECLARED}
+    assert not by_name[ACCOUNT_ID].required and by_name[TOKEN].required
+    config = config_from({TOKEN: "t0ken-value"})
+    assert config.credentials is not None and config.missing == () and config.account_id == ""
+    assert config_from({TOKEN: "t0ken-value", ACCOUNT_ID: " 101-001-1-001 "}).account_id == (
+        "101-001-1-001"
+    )

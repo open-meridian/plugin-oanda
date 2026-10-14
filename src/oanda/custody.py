@@ -2,8 +2,10 @@
 and its activity, as the custodian's view, through the SDK's typed
 operations.
 
-**The account.** `account_id`'s v20 account, the one the settings name, is
-the external account it reports (W2.8), by OANDA's account ID. Its kind is
+**The account.** The v20 account the connection names (connection.py: the
+`account_id` setting where given, else the one an admin chose on
+Connections) is the external account it reports (W2.8), by OANDA's account
+ID; until there is one, nothing is read. Its kind is
 converted from what OANDA states, its margin rate: below 1 a margin
 account; at 1, or unstated, not known, OANDA's margin rate beside it as
 reported (OANDA states no account type).
@@ -352,9 +354,7 @@ class Syncer:
         if connection is None:
             self.status = Status(waiting_for=self.connections.config.missing)
             await self._health(
-                healthy=False,
-                detail="waiting for its settings: " + ", ".join(self.status.waiting_for),
-                figures=self.figures(),
+                healthy=False, detail=self.connections.waiting(), figures=self.figures()
             )
             return self.status
         now = self.now()

@@ -360,6 +360,10 @@ class CustodyRig:
         self.storage = Path(tempfile.mkdtemp())
         self.connections = Connections(self.storage, self.clock)
         self.connections.configure(Config(synthetic=True))
+        # The synthetic OANDA's accounts listed, and its v20 account chosen,
+        # as an admin chooses it on Connections.
+        self.connections.take(list(synthetic.ACCOUNTS))
+        assert self.connections.choose(ACCOUNT, "Rig Admin") == ""
         assert self.connections.current is not None, "the synthetic OANDA, made"
         self.raw = RawStore(self.storage, self.storage)
         recorder.answer("ResolveIdentifier", resolve)

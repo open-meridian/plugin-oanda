@@ -34,6 +34,6 @@
 {% call intent_form("create", account.external_account_id) %}<div class="field-row"><label class="field"><span>A new account</span><input type="text" name="new_account_name" required maxlength="200"></label><input type="hidden" name="new_account_custodian" value="OANDA"><input type="hidden" name="new_account_type" value="{{ account_type }}"><button class="primary">Create and link</button></div>{% endcall %}
 {% endif %}
 {% else %}
-<div class="empty-state"><strong>No account yet: it appears here once OANDA is read.</strong></div>
+<div class="empty-state"><strong>No account yet: it appears here once the account is chosen on Connections and OANDA is read.</strong></div>
 {% endfor %}
 {% endblock %}
