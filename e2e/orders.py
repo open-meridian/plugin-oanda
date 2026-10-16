@@ -4,8 +4,10 @@ the desk (e2e/desk.py) holding `portfolio`, `oms` and `ems`. SIMULATED
 ONLY: the synthetic OANDA (src/oanda/synthetic.py); no OANDA host, practice
 or live, is reached.
 
-1. Set up: an account for the orders, the desk's grants on it, EUR's and
-   USD's cash instruments named; OANDA made available and linked to the
+1. Set up: the synthetic OANDA's clock set to the coming Tuesday at 12:00
+   New York (decision 66), so its fills trade on a Tuesday and its roll is
+   that day's 17:00, whatever day the e2e runs; an account for the orders,
+   the desk's grants on it, EUR's and USD's cash instruments named; OANDA made available and linked to the
    desk, the account mapped to the synthetic account's code; trading
    enabled on the connection under the connectivity role's admin (a new
    connection is read-only); releases not waiting for compliance.
@@ -42,7 +44,10 @@ import json
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime, timedelta
+from datetime import time as clock_time
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 COMPOSE = sys.argv[1:]
 LOG = ".e2e/orders.log"
@@ -184,6 +189,33 @@ def oanda_orders():
     return json.loads(said.strip().splitlines()[-1])
 
 
+def controlled_clock(now=None):
+    """The moment the synthetic OANDA's clock is set to (decision 66): the
+    coming Tuesday at 12:00 New York, strictly after now, so a clock is only
+    set forward. Its fills trade that Tuesday, spot Thursday; its roll at
+    17:00 moves them to Wednesday's spot date, Friday, the same every run."""
+    new_york = ZoneInfo("America/New_York")
+    now = now or datetime.now(new_york)
+    day = now.date() + timedelta(days=(1 - now.weekday()) % 7)
+    at = datetime.combine(day, clock_time(12), new_york)
+    if at <= now:
+        at += timedelta(days=7)
+    return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def oanda_clock_ahead():
+    """How far the synthetic OANDA's clock runs ahead of the wall clock, in
+    nanoseconds, as its state holds it: 0 until a clock is set."""
+    said = compose(
+        "exec", "-T", "oanda", "python", "-c",
+        "import json; from meridian import edge;"
+        "p = edge.storage_dir() / 'synthetic-oanda' / 'state.json';"
+        "held = json.loads(p.read_text()) if p.exists() else {};"
+        "print(int(held.get('clock_ahead_ns', 0)))",
+    ).stdout
+    return int(said.strip().splitlines()[-1])
+
+
 def sent_once(placement_id):
     return [o for o in oanda_orders() if o[0] == placement_id and not o[2]]
 
@@ -192,6 +224,9 @@ def run():
     # 1. Set up, once the desk has registered: on a fast runner the custody
     # steps can end before it has.
     runner("ready", "--instance", "desk")
+    clock = controlled_clock()
+    ask_oanda({"clock": clock})
+    until(60, lambda: oanda_clock_ahead() > 0, f"step 1, the synthetic OANDA's clock not set to {clock}")
     account = runner("account", "E2E Orders", "--instance", "desk").strip().splitlines()[-1]
     for role in ("portfolio", "oms", "ems"):
         runner("grant", "--instance", "desk", "--level", "write", "--role", role, "--accounts", account)

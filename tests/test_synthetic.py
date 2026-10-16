@@ -4,6 +4,7 @@ it keeps its state across a restart. It reaches nothing."""
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -91,3 +92,45 @@ def test_another_account_is_refused() -> None:
     with pytest.raises(VenueError) as refused:
         asyncio.run(venue.account("001-001-9-001"))
     assert refused.value.status == 403
+
+
+# ── A controlled clock (decision 66) ────────────────────────────────────────
+
+
+def test_a_clock_asked_for_runs_the_accounts_times_from_it(tmp_path: Path) -> None:
+    """The e2e sets the account's clock to a moment it chooses, so the trade
+    dates reported never depend on the day it runs: each transaction after it
+    is dated from that moment, at the wall clock's pace, kept across a
+    restart."""
+    wall = Clock(NOW)
+    state = synthetic.state_file(tmp_path)
+    venue = SyntheticOanda(wall, state)
+    synthetic.ask(tmp_path, {"clock": "2026-10-20T16:00:00Z"})
+    asyncio.run(venue.transactions_since(synthetic.ACCOUNT_ID, "0"))
+    wall.at = NOW + timedelta(minutes=5)
+    answer = asyncio.run(venue.place(synthetic.ACCOUNT_ID, ORDER))
+    assert answer["orderCreateTransaction"]["time"].startswith("2026-10-20T16:05:00")
+    again = SyntheticOanda(wall, state)
+    assert again.trading_day().isoformat() == "2026-10-20"
+
+
+def test_a_clock_is_never_set_back(tmp_path: Path) -> None:
+    venue = SyntheticOanda(Clock(NOW), synthetic.state_file(tmp_path))
+    assert not venue.set_clock("2026-10-01T16:00:00Z")
+    assert not venue.set_clock("not a time")
+    assert venue.set_clock("2026-10-20T16:00:00Z")
+    assert not venue.set_clock("2026-10-19T16:00:00Z")
+
+
+def test_setting_the_clock_rolls_nothing(tmp_path: Path) -> None:
+    """The day the clock is set to counts as rolled: only the next 17:00 New
+    York after it rolls the open trades."""
+    wall = Clock(NOW)
+    venue = SyntheticOanda(wall, synthetic.state_file(tmp_path))
+    before = len(venue.transactions())
+    assert venue.set_clock("2026-10-20T16:00:00Z")
+    asyncio.run(venue.transactions_since(synthetic.ACCOUNT_ID, "0"))
+    assert len(venue.transactions()) == before
+    wall.at = NOW + timedelta(hours=6)
+    asyncio.run(venue.transactions_since(synthetic.ACCOUNT_ID, "0"))
+    assert {t["type"] for t in venue.transactions()[before:]} == {"DAILY_FINANCING"}

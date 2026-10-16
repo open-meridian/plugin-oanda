@@ -148,7 +148,7 @@ from meridian.plugin.v1 import operations_pb2 as ops
 
 from . import moments
 from .connection import Connection
-from .declaration import seen_in_fill
+from .declared import seen_in_fill
 from .kept import Kept
 from .pairs import PairMap
 from .raw import CANCEL, OFFERED, ORDER, PLACE, REPLACE, STREAMED, RawStore, call, failed

@@ -140,7 +140,7 @@ e2e: image
 		case "$$image" in *@sha256:*) ;; *) docker pull -q "$$image" >/dev/null 2>&1 || true;; esac; \
 	done
 	@started=$$(date +%s); \
-	trap '$(E2E) down -v --remove-orphans >>.e2e/components.log 2>&1; rm -rf .e2e/harness' EXIT; \
+	trap '$(E2E) --profile runner down -v --remove-orphans >>.e2e/components.log 2>&1; rm -rf .e2e/harness' EXIT; \
 	fail() { grep -h '^harness .* FAILED' .e2e/runner.log 2>/dev/null | tail -1 >&2; \
 		echo "e2e FAILED: $$1; the components' logs are in .e2e/components.log, the runner's in .e2e/runner.log" >&2; \
 		$(E2E) logs --no-color >>.e2e/components.log 2>&1; exit 1; }; \
@@ -152,7 +152,7 @@ e2e: image
 	docker run --rm -i -v "$(CURDIR)/.e2e/harness":/harness:ro python:3.12-alpine \
 		python /harness/harness.py compose <.e2e/plugins.json >.e2e/harness/plugins.yaml 2>>.e2e/components.log \
 		|| { echo "e2e FAILED: the harness did not write its plugins from .e2e/plugins.json" >&2; exit 1; }; \
-	$(E2E) down -v --remove-orphans >>.e2e/components.log 2>&1; \
+	$(E2E) --profile runner down -v --remove-orphans >>.e2e/components.log 2>&1; \
 	$(E2E) up -d >>.e2e/components.log 2>&1 || fail "the harness did not start"; \
 	custody="$$(MERIDIAN_RUNTIME_IMAGE=$(RUNTIME_IMAGE) E2E_DIR=$(CURDIR)/e2e python3 e2e/custody.py $(E2E_COMPOSE))" \
 		|| fail "the custody steps (e2e/custody.py) failed: $$(tail -c 600 .e2e/custody.log)"; \

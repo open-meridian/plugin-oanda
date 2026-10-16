@@ -14,6 +14,11 @@ for an Open Meridian deployment. The plugin holds two roles:
 A `data` role, for OANDA's bid/ask quotes and a 17:00 New York daily close,
 is planned for a later version of this repository (ruled 2026-10-13).
 
+Version 0.4.0 (not released) is built on open-meridian 0.29.0, contract v25:
+the version's whole declaration -- its settings, pages and tools, the
+accounts it names by OANDA's IDs, its storage -- and its documentation in
+[docs/](docs/), which a deployment shows on the plugin's Documentation tab.
+
 OANDA is a trademark of its owner. This project is not affiliated with or
 endorsed by OANDA. It connects to OANDA's published API with an access token
 that the deployment's administrator supplies. Which broker a person may trade
@@ -136,8 +141,11 @@ form, holds the street to `e2e/expected.street` and
 (`e2e/desk.py`, `e2e/orders.py`): a limit and a market order filled and
 pending to their value date, an order from OANDA's app reported on no
 placement, a roll, the desk's accept and its catch-up roll, a replace, a
-cancel, a pause, a stop and a restart. The order path needs contract v23's
-core: until core v23 is published, run it as
+cancel, a pause, a stop and a restart. **On a controlled clock** (decision
+66): before the order path, the e2e sets the synthetic OANDA's clock to the
+coming Tuesday at 12:00 New York, so its fills trade on a Tuesday and its
+roll is that day's 17:00, whatever day the e2e runs; the clock runs on from
+there and is only ever set forward. Until core v25 is published, run it as
 `make e2e RUNTIME_IMAGE=... HARNESS_IMAGE=...` with a local build.
 
 **Safety:** tests and `make e2e` use the synthetic OANDA only. Any run on a

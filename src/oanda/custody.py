@@ -78,7 +78,7 @@ from meridian.roles import custody as custody_role
 
 from . import moments
 from .connection import Connection, Connections
-from .declaration import seen_in_account, seen_in_fill, seen_in_financing
+from .declared import seen_in_account, seen_in_fill, seen_in_financing
 from .pairs import PairMap
 from .raw import ACCOUNT, INSTRUMENTS, TRANSACTIONS, RawStore, call, failed
 from .venue import Json, VenueError, as_json

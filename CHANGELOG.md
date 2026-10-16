@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.0
+
+On SDK 0.29.0 and contract v25 (sdk-contract/plugins-are-shared-and-
+documented-contract), the v25 build's step 8; on top of 0.3.0, which merges
+first.
+
+- **The whole declaration** (`declaration.py`): its settings, its interface
+  -- Connections, Account links, Statements and Raw records, with the tools
+  their routes make -- on a port fixed at 8000, that it reads external
+  accounts, what it does not carry, its storage, and its documentation.
+  `__main__` connects with the declaration alone; so does the e2e's desk.
+  The parts the pages import moved to `declared.py`.
+- **Its documentation** (`docs/`): overview, setup, pages, troubleshooting
+  and terms, written from this README and the code, linking the custody
+  role's page.
+- **A controlled clock in the e2e** (decision 66): the synthetic OANDA takes
+  `{"clock": "<RFC 3339 time>"}` through `ask()`, its own times running on
+  from that moment, kept with its state, never set back, the day set taken
+  as rolled. `e2e/orders.py` sets it to the coming Tuesday at 12:00 New York
+  before the order path, so the trade dates it reports never depend on the
+  day the e2e runs (it failed from Thursday 17:00 to Saturday 17:00 New
+  York).
+- **The suites**: custody's v24 case, a holding the venue names by its code
+  alone, the metal XAU the platform does not hold, recorded unresolved;
+  connectivity's give-up case not presented (no trade is given up at
+  OANDA); the two cases every suite holds answered by the SDK.
+- **The pins**: open-meridian 0.29.0 and plugin-python:0.29.0, core v25's
+  runtime and harness, and `meridian` 0.1.46 in `check.yaml`, each a marked
+  placeholder until published.
+- **`make e2e`** takes the harness down with `--profile runner`.
+
 ## 0.3.0
 
 On SDK 0.27.0 and contract v23. An admin picks the OANDA account from those
