@@ -7,7 +7,8 @@
 # Move the two together when moving to a new SDK.
 #
 # BASE is for building against a base made locally rather than a released one.
-ARG BASE=ghcr.io/open-meridian/plugin-python:0.27.0
+# PLACEHOLDER (v25): plugin-python:0.29.0 is not published yet (it is, with open-meridian 0.29.0).
+ARG BASE=ghcr.io/open-meridian/plugin-python:0.29.0
 FROM ${BASE}
 WORKDIR /plugin
 # Installed from a mount rather than copied, so the image holds the installed
