@@ -14,5 +14,9 @@ WORKDIR /plugin
 # Installed from a mount rather than copied, so the image holds the installed
 # package and no source beside it.
 RUN --mount=type=bind,target=/tmp/src,rw pip install --no-cache-dir /tmp/src
+# The vendor's documentation (contract v25): the declaration names docs/,
+# relative to where the plugin runs, /plugin, and `meridian-declaration`
+# reads it there when `meridian plugin upload` prints the declaration.
+COPY docs/ docs/
 USER 65532
 CMD ["oanda"]
