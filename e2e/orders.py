@@ -54,10 +54,9 @@ LOG = ".e2e/orders.log"
 CODE = "101-001-0000000-001"
 CONNECTION = f"synthetic:{CODE}"
 WORKS = "1000000"
-# EUR's cash instrument as `store book` prints it: the deployment's record
-# (its LCL- ID, drawn per run) by its identifiers in force, the harness's
-# published format.
-EUR_IN_BOOK = "local(iso4217:EUR, open_meridian:INS-01JEUR00000000000000000001)"
+# EUR's cash instrument as `store book` prints it: the platform's record by
+# its INS- ID (contract v24's one-ID model), the harness's published format.
+EUR_IN_BOOK = "INS-01JEUR00000000000000000001"
 
 
 class Failed(Exception):
