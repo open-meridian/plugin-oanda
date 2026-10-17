@@ -40,12 +40,13 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any, cast
 
-from meridian.suites import Recorder, names, run, suite
+from meridian.plugin.v1 import operations_pb2 as ops
+from meridian.suites import ANSWERED_BY_SDK, Recorder, names, run, suite
 
 from oanda.linking import Links
 from oanda.venue import VenueError
 
-from rigs import ACCOUNT, CustodyRig, Producer
+from rigs import ACCOUNT, CustodyRig, Producer, resolved
 
 NOT_PRESENTED = {
     "sync-disabled": (
@@ -109,6 +110,22 @@ async def cash_only(recorder: Recorder) -> None:
     await rig.syncer.run_once()
 
 
+async def thin(recorder: Recorder) -> None:
+    """The metal OANDA names by its code alone, XAU, stating no description of
+    it, and the platform holding no record of it (contract v24): its leg
+    recorded unresolved, naming the code it was given, never guessed."""
+
+    def not_found(params: ops.ResolveIdentifierParams) -> ops.ResolveIdentifierResult:
+        if any(held.value == "XAU" for held in params.identifiers):
+            return ops.ResolveIdentifierResult(
+                found=False, miss_reason=ops.MISS_REASON_NOT_FOUND
+            )
+        return resolved(params)
+
+    rig = CustodyRig(recorder, resolve=not_found)
+    await rig.syncer.run_once()
+
+
 async def no_leverage(recorder: Recorder) -> None:
     rig = CustodyRig(recorder)
     rig.venue._state["account"]["marginRate"] = "1"
@@ -151,6 +168,7 @@ PRODUCERS: dict[str, Producer] = {
     "read-accounts-for-linking": linking_page,
     "link-a-new-account": a_new_account,
     "a-security-holding": cash_only,
+    "records-a-thinly-described-holding-unresolved": thin,
     "institution-not-stated": read,
     "settled-quantity-not-stated": read,
     "pending-by-value-date": read,
@@ -173,7 +191,8 @@ PRODUCERS: dict[str, Producer] = {
 
 def test_every_case_is_mapped_or_said_not_presented() -> None:
     every = set(names("custody"))
-    assert every == set(PRODUCERS) | set(NOT_PRESENTED)
+    # Contract v24: the two cases every suite holds, which the SDK answers.
+    assert every == set(PRODUCERS) | set(NOT_PRESENTED) | set(ANSWERED_BY_SDK)
     assert not set(PRODUCERS) & set(NOT_PRESENTED)
     cases = {case.name: case for case in suite("custody").cases}
     assert all(cases[name].closed_list or cases[name].about for name in NOT_PRESENTED), (
@@ -184,7 +203,7 @@ def test_every_case_is_mapped_or_said_not_presented() -> None:
 def test_the_custody_suite_passes() -> None:
     report = run("custody", PRODUCERS, not_presented=NOT_PRESENTED, instance_id="oanda")
     assert report.passed, report.failures
-    assert sorted(report.passed_cases) == sorted(PRODUCERS)
+    assert sorted(report.passed_cases) == sorted([*PRODUCERS, *ANSWERED_BY_SDK])
     assert sorted(report.not_presented) == sorted(NOT_PRESENTED)
 
 

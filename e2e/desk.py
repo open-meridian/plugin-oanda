@@ -259,12 +259,24 @@ def serve(desk):
     http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 
 
+#: The roles the stand-in holds, as the e2e launches it.
+ROLES = ["portfolio", "oms", "ems", "reporting"]
+
+#: What the stand-in registers, its whole declaration (contract v25): the
+#: e2e prints it with meridian-declaration and the harness holds the
+#: stand-in's registration to it.
+DECLARATION = meridian.Declaration(
+    interface=Interface(
+        PORT, "Desk", pages=[Page("/", "Desk", levels=["write", "admin"], roles=ROLES)]
+    )
+)
+
+
 async def main():
-    roles = ["portfolio", "oms", "ems", "reporting"]
+    roles = ROLES
     plugin = await meridian.connect(
-        interface=Interface(
-            PORT, "Desk", pages=[Page("/", "Desk", levels=["write", "admin"], roles=roles)]
-        )
+        # Contract v25: what the stand-in registers is its declaration.
+        declaration=DECLARATION
     )
     print(f"DESK registered as {plugin.identity.instance_id}", flush=True)
     threading.Thread(target=serve, args=(Desk(plugin),), daemon=True).start()

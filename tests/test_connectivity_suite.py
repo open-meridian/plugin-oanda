@@ -30,13 +30,17 @@ import asyncio
 from decimal import Decimal
 
 from meridian.plugin.v1 import operations_pb2 as ops
-from meridian.suites import Recorder, names, run, suite
+from meridian.suites import ANSWERED_BY_SDK, Recorder, names, run, suite
 
 from oanda import synthetic
 
 from rigs import Producer, TradeRig, placement
 
 NOT_PRESENTED = {
+    "reports-a-give-up-rejected": (
+        "OANDA executes and clears each trade in the account that placed it: no trade is "
+        "given up to a prime broker, so none is rejected"
+    ),
     "reports-a-bust": (
         "OANDA's v20 transactions have no bust and no trade correction: a fill is never "
         "taken back"
@@ -259,7 +263,8 @@ PRODUCERS: dict[str, Producer] = {
 
 def test_every_case_is_mapped_or_said_not_presented() -> None:
     every = set(names("connectivity"))
-    assert every == set(PRODUCERS) | set(NOT_PRESENTED)
+    # Contract v24: the two cases every suite holds, which the SDK answers.
+    assert every == set(PRODUCERS) | set(NOT_PRESENTED) | set(ANSWERED_BY_SDK)
     assert not set(PRODUCERS) & set(NOT_PRESENTED)
     held = {case.name: case.about or case.about_field for case in suite("connectivity").cases}
     assert all(held[name] for name in NOT_PRESENTED), "a required case is never skipped"
@@ -268,7 +273,7 @@ def test_every_case_is_mapped_or_said_not_presented() -> None:
 def test_the_connectivity_suite_passes() -> None:
     report = run("connectivity", PRODUCERS, not_presented=NOT_PRESENTED, instance_id="oanda")
     assert report.passed, report.failures
-    assert sorted(report.passed_cases) == sorted(PRODUCERS)
+    assert sorted(report.passed_cases) == sorted([*PRODUCERS, *ANSWERED_BY_SDK])
     assert sorted(report.not_presented) == sorted(NOT_PRESENTED)
 
 

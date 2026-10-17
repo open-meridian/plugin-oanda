@@ -25,7 +25,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import signal
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -36,13 +35,13 @@ from meridian import edge
 from .archive import Keeper
 from .connection import Connections
 from .custody import Syncer
-from .declaration import DECLARATION
+from .declaration import DECLARATION, PORT
 from .kept import Kept, file_in
 from .linking import Links, failure
-from .page import TITLE, Held, pages, serve
+from .page import Held, serve
 from .pairs import PairMap, pairs_file
 from .raw import RawStore, storage_root
-from .settings import DECLARED, config_from
+from .settings import config_from
 from .trading import POLL_SECONDS, SYNTHETIC_POLL_SECONDS, Trader
 
 log = logging.getLogger("oanda")
@@ -103,13 +102,11 @@ async def run() -> None:
     for stop in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(stop, stopped.set)
 
-    port = int(os.environ.get("OANDA_PAGE_PORT", "8000"))
-    async with await meridian.connect(
-        interface=meridian.Interface(port=port, title=TITLE, pages=pages),
-        settings=DECLARED,
-        declaration=DECLARATION,
-        reads_external_accounts=True,
-    ) as plugin:
+    port = PORT
+    # The version's whole declaration (declaration.py): its settings, its
+    # pages with the levels each serves and their tools, and its documentation.
+    # A version registers exactly what it was uploaded with (contract v25).
+    async with await meridian.connect(declaration=DECLARATION) as plugin:
         log.info(
             "registered as %s, roles %s",
             plugin.identity.instance_id,

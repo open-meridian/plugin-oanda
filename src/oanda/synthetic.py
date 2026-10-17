@@ -56,6 +56,14 @@ takes a market order as OANDA's platform or app takes one, outside the
 plugin: no client extensions, filled at once. The e2e asks for one, or for a
 roll, through `ask()`: a request file in the account's state directory, taken
 on the synthetic account's next step, so nothing writes its state but itself.
+
+**A controlled clock** (decision 66, 2026-10-16). Through `ask()` the e2e may
+set the synthetic account's clock (`{"clock": "<RFC 3339 time>"}`): from
+then on the account's own times -- each transaction's, each fill's, each
+17:00 roll's -- run on from that moment at the wall clock's pace, kept with
+its state, so the trade dates the plugin reports never depend on the day the
+e2e happens to run. A clock is only ever set forward, never back, so the
+account's transactions stay in time order.
 """
 
 from __future__ import annotations
@@ -159,9 +167,11 @@ def _price_text(instrument: str, value: Decimal) -> str:
 @dataclass
 class _Clock:
     now: Callable[[], datetime]
+    #: How far the account's clock runs ahead of `now` (a controlled clock).
+    ahead_ns: int = 0
 
     def ns(self) -> int:
-        return moments.of(self.now())
+        return moments.of(self.now()) + self.ahead_ns
 
     def text(self) -> str:
         return moments.rfc3339(self.ns())
@@ -175,6 +185,7 @@ class SyntheticOanda(Venue):
         self._file = state
         self.unanswered = 0
         self._state: Json = self._load()
+        self._clock.ahead_ns = int(self._state.get("clock_ahead_ns", 0))
 
     # ── State ───────────────────────────────────────────────────────────
 
@@ -473,6 +484,20 @@ class SyntheticOanda(Venue):
         self._save()
         return made
 
+    def set_clock(self, at: str) -> bool:
+        """The account's clock set to `at`, an RFC 3339 time, running on from
+        it (decision 66); refused, changing nothing, where it is not a time
+        or would move the clock back. The day `at` falls in is taken as
+        already rolled, so setting it rolls nothing."""
+        wanted = moments.ns(at)
+        if not wanted or wanted < self._clock.ns():
+            return False
+        self._clock.ahead_ns = wanted - moments.of(self._clock.now())
+        self._state["clock_ahead_ns"] = self._clock.ahead_ns
+        self._state["rolled"] = moments.trading_day(self._clock.ns()).isoformat()
+        self._save()
+        return True
+
     def in_the_app(self, instrument: str, units: Decimal) -> str:
         """A market order taken in OANDA's own platform or app, outside the
         plugin: no client extensions, filled at once. Its order's ID."""
@@ -504,6 +529,9 @@ class SyntheticOanda(Venue):
             asked.unlink(missing_ok=True)
             if not isinstance(request, dict):
                 continue
+            clock = request.get("clock")
+            if isinstance(clock, str) and self.set_clock(clock):
+                taken = True
             if request.get("roll"):
                 self.roll()
                 taken = True
@@ -938,8 +966,9 @@ def state_file(storage: Path | None) -> Path | None:
 
 def ask(storage: Path, request: Json) -> None:
     """Ask the synthetic account in `storage` for an order in OANDA's own
-    app (`{"order": {"instrument": ..., "units": ...}}`) or a roll
-    (`{"roll": true}`), taken on its next step: the e2e's way in."""
+    app (`{"order": {"instrument": ..., "units": ...}}`), a roll
+    (`{"roll": true}`) or its clock set (`{"clock": "<RFC 3339 time>"}`),
+    taken on its next step: the e2e's way in."""
     held = state_file(storage)
     assert held is not None
     inbox = held.parent / "app"

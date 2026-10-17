@@ -1,0 +1,45 @@
+# Troubleshooting
+
+## Settings missing
+
+The status dot names the missing settings, and nothing is read. Enter them
+on Manage → Settings ([Setup](setup.md)).
+
+## OANDA refused the token
+
+The token was revoked, or is for the other environment. Make a new token in
+OANDA's hub for the account's login and enter it, with the matching
+Environment.
+
+## No account to choose
+
+The token reaches no v20 account, or only v1 accounts, which are listed as
+unusable with why. This plugin speaks only OANDA's v20 API.
+
+## Every order is rejected as unsupported
+
+Trading is not enabled on the connection in use. A new connection, or one
+returned to after a change of account or environment, is read-only until an
+admin of the connectivity role enables it on Connections.
+
+## An order rejected naming a pair
+
+The order is in one currency priced in another, the other way round from
+how OANDA quotes the pair. Place it in the pair's base currency, priced in
+its quote currency.
+
+## A fill waits
+
+A fill is sent only with its value date, from the deployment's date read.
+Where the date read gives no answer, the fill waits and is asked about again
+on each read.
+
+## A fill on no order
+
+OANDA reported a fill of an order taken in its own app, or by OANDA itself.
+Your execution plugin's desk accepts it to an order or answers it DK.
+
+## Stale
+
+OANDA has not answered for longer than Stale after. It is read again on the
+next poll; Connections says what OANDA last answered.

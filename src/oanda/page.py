@@ -44,7 +44,7 @@ from meridian.roles import custody as custody_role
 from . import records
 from .connection import Connections, Listing
 from .custody import Row, Syncer, account_kind
-from .declaration import KINDS
+from .declared import KINDS
 from .linking import Links, refusal, refused
 from .raw import dumps
 from .settings import TOKEN, label

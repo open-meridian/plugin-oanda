@@ -1,98 +1,36 @@
-"""What this version declares beside its roles (W8.1, W4.1, contract v11).
+"""What this version declares beside its roles (W8.1, W4.1): from contract
+v25 the whole of what it says about itself.
 
 Built from the plugin's code and used twice: `__main__` registers with it,
 and `meridian plugin upload` reads the same one from the built image
-(pyproject.toml's `[tool.meridian] declaration`). Its secret setting's name,
-`token`, is the one settings.py declares secret.
-
-What OANDA sends and this plugin does not carry, by name only, each with
-why (spec/vendor-differences-have-a-place-in-the-contract, Q15): the
-evidence that the common model may need to grow. Each is counted as it is
-seen, and the count rides on the heartbeat, never leaving the deployment.
-
-And the storage it asks for, at the edge, for OANDA's raw records
-(decisions/028), in three kinds (contract v16; raw.py): a reported
-activity's record, seven years by default; each read's raw responses, 30
-days by default; and each trading exchange (`trading`, as SnapTrade's,
-approved 2026-10-13), seven years by default; all archivable.
+(pyproject.toml's `[tool.meridian] declaration`), with the documentation's
+texts beside it. A version registers exactly the declaration it was uploaded
+with, or its sidecar refuses it naming the first difference, so beside the
+parts it declared before (declared.py, whose docstring says what each is)
+it carries its interface -- its pages, with the levels each serves, and the
+tools their typed routes make -- on a port fixed here, never read from the
+environment, and the vendor's documentation, the Markdown in `docs/`
+(`/plugin/docs` in its image), which a deployment admin reads on its
+Documentation tab before launching it.
 """
 
 from __future__ import annotations
 
-from meridian.declaration import Declaration, NotCarried, RecordKind, Storage
+import meridian
+from meridian.declaration import Declaration, Storage
 
-from .settings import (
-    ACTIVITY,
-    DECLARED,
-    DEFAULT_ACTIVITY_RETENTION_DAYS,
-    DEFAULT_RAW_RETENTION_DAYS,
-    DEFAULT_TRADING_RETENTION_DAYS,
-    MOST_RETENTION_DAYS,
-    RESPONSES,
-    TRADING,
-)
+from .declared import KINDS, NOT_CARRIED
+from .page import TITLE, pages
+from .settings import DECLARED, MOST_RETENTION_DAYS
 
-ACTIVITY_KIND = RecordKind(
-    ACTIVITY, "Reported activity", window_days=DEFAULT_ACTIVITY_RETENTION_DAYS, archivable=True
-)
-RESPONSES_KIND = RecordKind(
-    RESPONSES, "Raw responses", window_days=DEFAULT_RAW_RETENTION_DAYS, archivable=True
-)
-TRADING_KIND = RecordKind(
-    TRADING, "Trading", window_days=DEFAULT_TRADING_RETENTION_DAYS, archivable=True
-)
-KINDS = (ACTIVITY_KIND, RESPONSES_KIND, TRADING_KIND)
-
-ACCOUNT = "oanda:account"
-FILL = "oanda:order-fill"
-FINANCING = "oanda:daily-financing"
-
-#: Each name not carried, with why.
-NOT_CARRIED = (
-    # The account's own figures: OANDA's margin available is no buying power,
-    # and its unrealised profit is a valuation, which is reporting's.
-    NotCarried("custody", ACCOUNT, "marginAvailable", "no_contract_meaning"),
-    NotCarried("custody", ACCOUNT, "unrealizedPL", "no_contract_meaning"),
-    NotCarried("custody", ACCOUNT, "marginCloseoutPercent", "no_contract_meaning"),
-    # A fill's cost of the spread and its conversion factors to the home
-    # currency: no field of an execution or an activity holds them.
-    NotCarried("connectivity", FILL, "halfSpreadCost", "no_contract_meaning"),
-    NotCarried("connectivity", FILL, "gainQuoteHomeConversionFactor", "no_contract_meaning"),
-    NotCarried("connectivity", FILL, "lossQuoteHomeConversionFactor", "no_contract_meaning"),
-    NotCarried("custody", FILL, "halfSpreadCost", "no_contract_meaning"),
-    # The financing's split by open trade: custody reports the whole as one
-    # activity; the split is each placement's charge (connectivity).
-    NotCarried("custody", FINANCING, "positionFinancings", "no_contract_meaning"),
-)
+#: The port its pages are served on, on loopback, where its sidecar forwards.
+PORT = 8000
 
 DECLARATION = Declaration(
     settings=DECLARED,
     not_carried=NOT_CARRIED,
     storage=Storage(retention_days=MOST_RETENTION_DAYS, kinds=KINDS),
+    interface=meridian.Interface(port=PORT, title=TITLE, pages=pages),
+    reads_external_accounts=True,
+    documentation="docs",
 )
-
-
-def seen_in_fill(fill: dict[str, object], role: str) -> list[tuple[str, str]]:
-    """The names not carried one of OANDA's fills shows, for `role`."""
-    names = (
-        ("halfSpreadCost",)
-        if role == "custody"
-        else (
-            "halfSpreadCost",
-            "gainQuoteHomeConversionFactor",
-            "lossQuoteHomeConversionFactor",
-        )
-    )
-    return [(FILL, name) for name in names if fill.get(name) not in (None, "", "0", "0.0000")]
-
-
-def seen_in_account(account: dict[str, object]) -> list[tuple[str, str]]:
-    return [
-        (ACCOUNT, name)
-        for name in ("marginAvailable", "unrealizedPL", "marginCloseoutPercent")
-        if account.get(name) not in (None, "")
-    ]
-
-
-def seen_in_financing(financing: dict[str, object]) -> list[tuple[str, str]]:
-    return [(FINANCING, "positionFinancings")] if financing.get("positionFinancings") else []

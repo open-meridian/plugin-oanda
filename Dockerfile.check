@@ -20,6 +20,10 @@ RUN --mount=type=bind,from=sdk,target=/sdk,rw --mount=type=cache,target=/root/.c
     if [ -f /sdk/pyproject.toml ]; then pip install /sdk; fi
 RUN --mount=type=cache,target=/root/.cache/pip pip install -e ".[dev]"
 COPY tests tests
+# The vendor's documentation beside the plugin, as its image has it at
+# /plugin/docs (contract v25): the declaration names docs/, relative to where
+# the plugin runs, and the tests print it as the upload reads it.
+COPY docs docs
 
 # Run by `make test` and `make preview` with `docker run`.
 FROM base AS test
