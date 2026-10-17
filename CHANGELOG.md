@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.3.0
+
+On SDK 0.27.0 and contract v23. An admin picks the OANDA account from those
+the token reaches, instead of typing its ID (approved by the product owner,
+2026-10-14).
+
+- `account_id` is optional. Once the token is set, the plugin lists the v20
+  accounts it reaches (OANDA's `GET /v3/accounts`) on Connections, under
+  Account, on every poll and settings change, and an admin picks one with
+  "Use this account": the `choose_account` tool, checked by
+  `check_choose_account`, at admin on both `custody` and `connectivity`, as
+  the setting serving both asks. It is a declared act, like
+  `enable_trading`: the dashboard admits it as the person's, records an
+  agent's call as theirs, and can hold it for a second person. The plugin
+  sets no setting: who chose which account, and when, is kept in its
+  storage (`state/account.json`), per environment.
+- Where the token reaches exactly one usable account, it is preselected,
+  but nothing is read or traded until an admin confirms it. Nothing is
+  picked silently.
+- A v1 account, whose ID is digits only, is listed as unusable, with the
+  reason. It cannot be chosen.
+- An `account_id` setting that is set is the account, as before. While it
+  is set, Connections lists the accounts and offers no choice.
+- The connection is still the environment and the account: choosing a
+  different account makes a new connection, read-only until trading is
+  enabled on it.
+- Switching away turns trading off (approved by the product owner,
+  2026-10-14). When the connection in use changes, by `choose_account` or
+  by the `account_id` or `environment` setting, trading on the one left is
+  turned off. The change is recorded in the plugin's storage
+  (`state/trading-off.json`): which connection, the one now in use, the
+  change that caused it and who made it, when, and who had enabled it.
+  Returning to it finds it read-only, and a person enables trading again.
+  The connection last in use is kept (`state/in-use.json`), so a settings
+  change made while the plugin was stopped is caught when it starts.
+  `read_connections` answers `trading_turned_off` for the connection in
+  use, and Connections marks it.
+- `read_connections` answers the accounts the token reaches (`reached`),
+  the one in use and where it came from, and the one preselected.
+- Until an account is chosen, the plugin reports itself waiting for it.
+- The synthetic OANDA's token also reaches a v1 account. The e2e chooses
+  the synthetic account on Connections before linking it.
+
 ## 0.2.0
 
 On SDK 0.27.0 and contract v23. The 0.1.0 suite gaps are closed.

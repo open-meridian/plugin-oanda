@@ -11,9 +11,11 @@ What it holds survives the plugin's restart, as an account at OANDA does:
 the state is a JSON file in the plugin's storage, written whole on every
 change; with none given (a test) it lives in the process.
 
-**The account.** One v20 account in US dollars, opened 2026-06-01, a US
-account as OANDA's US division keeps it: positions net by instrument, the
-oldest trade closed first, at a margin rate of 2%. Its history, from the
+**The accounts.** The synthetic token reaches two (`accounts()`, OANDA's
+`GET /v3/accounts`): the v20 account below, and a v1 account, its ID digits
+only, which nothing here reads. **The v20 account** is one in US dollars,
+opened 2026-06-01, a US account as OANDA's US division keeps it: positions
+net by instrument, the oldest trade closed first, at a margin rate of 2%. Its history, from the
 start, holds one of each kind of transaction the plugin converts: the
 account funded, a EUR_USD buy taken outside the platform and still open,
 a day's financing on it, a USD_JPY trade opened and closed with a realised
@@ -74,6 +76,12 @@ from .venue import Json, Venue, VenueError, as_json
 
 #: The synthetic account's ID, as OANDA's practice IDs are written.
 ACCOUNT_ID = "101-001-0000000-001"
+#: The accounts the synthetic token reaches (`GET /v3/accounts`): the v20
+#: account above, and an older v1 account, its ID digits only, which the
+#: plugin lists as unusable. Only the v20 account is usable, so Connections
+#: preselects it, and it is still the admin's to confirm.
+V1_ACCOUNT_ID = "7000001"
+ACCOUNTS: tuple[Json, ...] = ({"id": ACCOUNT_ID, "tags": []}, {"id": V1_ACCOUNT_ID, "tags": []})
 OPENED = "2026-06-01T13:00:00.000000000Z"
 HOME = "USD"
 
@@ -544,7 +552,7 @@ class SyntheticOanda(Venue):
     # ── The interface ───────────────────────────────────────────────────
 
     async def accounts(self) -> list[Json]:
-        return [{"id": ACCOUNT_ID, "tags": []}]
+        return [dict(each) for each in ACCOUNTS]
 
     def _check(self, account_id: str, asked: str) -> None:
         if account_id not in (ACCOUNT_ID, ""):

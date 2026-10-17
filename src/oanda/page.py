@@ -6,12 +6,17 @@ in its blocks.
 - **Connections** (`/admin/connections`, `read_connections`) and **Account
   links** (`/admin/accounts`, `read_account_links`; `link_account`), at
   `admin`: setup only, account agnostic. Connections shows the connection
-  the settings name -- its environment and account, whether the token is
-  set (never its value), whether trading is enabled, and how many
-  placements are working, held back, asked about or waiting for a value
-  date -- and, for an admin of the `connectivity` role, "Enable trading"
-  (`enable_trading`, `/admin/connections/enable-trading`): a new connection
-  is read-only until then.
+  -- its environment and account, whether the token is set (never its
+  value), whether trading is enabled, and how many placements are working,
+  held back, asked about or waiting for a value date -- and, for an admin
+  of the `connectivity` role, "Enable trading" (`enable_trading`,
+  `/admin/connections/enable-trading`): a new connection is read-only until
+  then. From 0.3.0 its Account section lists the v20 accounts the token
+  reaches, a v1 account unusable with why, and an admin of each of the
+  plugin's roles picks the one to use ("Use this account", `choose_account`,
+  `/admin/connections/choose-account`): the only usable one is preselected,
+  never chosen until confirmed, and none is offered while the Account ID
+  setting names the account (connection.py).
 - **Statements** (`/`, `read_statements`) and **Raw records** (`/raw`), at
   `write` and `read`: the account's statement, its rows by currency with
   what is pending on each value date, for a person who may read the
@@ -26,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import http.server
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,7 +42,7 @@ import meridian
 from meridian.roles import custody as custody_role
 
 from . import records
-from .connection import Connections
+from .connection import Connections, Listing
 from .custody import Row, Syncer, account_kind
 from .declaration import KINDS
 from .linking import Links, refusal, refused
@@ -59,12 +65,14 @@ CONNECTIONS = "/admin/connections"
 ACCOUNTS = "/admin/accounts"
 READ = "/read"
 ENABLE_TRADING = f"{CONNECTIONS}/enable-trading"
+CHOOSE_ACCOUNT = f"{CONNECTIONS}/choose-account"
 LINK = "/admin/accounts/link"
 CHECK = "/check"
 INTENTS = ("link", "create", "unlink")
 pages.environment.globals["paths"] = {
     "read": READ,
     "enable_trading": ENABLE_TRADING,
+    "choose_account": CHOOSE_ACCOUNT,
     "link": LINK,
     "raw": RAW,
 }
@@ -144,6 +152,8 @@ def _connections_read() -> records.ConnectionsRead:
     held = _now()
     config = held.connections.config
     connection = held.connections.current
+    listing = held.connections.listing
+    choice = held.connections.choice
     status = held.syncer.status
     shown = held.trader.shown if held.trader is not None else None
     credentials = [custody_role.Credential(label(TOKEN), set=config.credentials is not None)]
@@ -167,6 +177,9 @@ def _connections_read() -> records.ConnectionsRead:
                 environment=connection.environment,
                 trading=connection.trading,
                 trading_enabled_by=by,
+                trading_turned_off=""
+                if connection.trading
+                else _turned_off(connection_id=connection.connection_id),
                 working=shown.working if shown else 0,
                 held=shown.held if shown else 0,
                 unknown=shown.unknown if shown else 0,
@@ -177,19 +190,81 @@ def _connections_read() -> records.ConnectionsRead:
         credentials=credentials,
         connections=rows,
         mode="sample data: the synthetic OANDA" if config.synthetic else config.environment,
+        reached=[
+            records.ReachedRead(a.account_id, a.usable, a.reason) for a in listing.accounts
+        ],
+        listed=listing.listed,
+        listing_error=listing.error,
+        account_id=choice.account_id,
+        account_from=choice.source,
+        account_chosen_by=choice.by,
+        preselected="" if choice.account_id else listing.preselected,
     )
 
 
-def _connections(notice: Notice | None = None) -> meridian.Response:
+def _turned_off(connection_id: str) -> str:
+    """When and why trading was last turned off on the connection by a
+    switch away from it, or ""."""
+    off = [e for e in _now().connections.turned_off() if e["connection_id"] == connection_id]
+    if not off:
+        return ""
+    last = off[-1]
+    return f"Trading was turned off here at {last['at']}, when {last['cause']}."
+
+
+def _may_choose(request: meridian.Request) -> bool:
+    """Whether the person may choose the account: admin on each of the
+    plugin's roles, as the Account ID setting, which serves both, asks."""
+    identity = getattr(request.plugin, "identity", None)
+    held = [r for r in getattr(identity, "roles", ()) if r in (CUSTODY, CONNECTIVITY)]
+    admin = meridian.AccessLevel.ACCESS_LEVEL_ADMIN
+    return all(request.caller.level_for(r) == admin for r in held or (CUSTODY, CONNECTIVITY))
+
+
+def _connections(
+    request: meridian.Request, notice: Notice | None = None, selected: str = ""
+) -> meridian.Response:
     data = _connections_read()
+    config = _now().connections.config
+    usable = [a for a in data.reached if a.usable]
+    # The account the form shows selected: the one asked for, else the one
+    # in use, else the only usable one -- shown, never chosen until sent.
+    selected = selected or data.account_id or data.preselected
     return meridian.Response(
         pages.render(
             "connections.html",
             data=data,
             notice=notice,
-            waiting=_now().connections.config.missing,
+            waiting=() if config.synthetic else config.missing,
+            usable=usable,
+            selected=selected if any(a.account_id == selected for a in usable) else "",
+            may_choose=_may_choose(request),
         )
     )
+
+
+async def _listed() -> Listing:
+    """The accounts the token reaches, asked of OANDA where these settings
+    have not listed them yet."""
+    connections = _now().connections
+    listing = connections.listing
+    if not listing.listed and connections.venue() is not None:
+        listing = await connections.discover()
+    return listing
+
+
+async def _prepared_account(request: meridian.Request) -> str:
+    """The account a prepared choose_account names, where the page was
+    opened from one (contract v20), for the form to start from."""
+    prepared = await request.prepared()
+    if prepared is None or prepared.tool_name != "choose_account":
+        return ""
+    try:
+        asked = json.loads(prepared.arguments_json or "{}")
+    except ValueError:
+        return ""
+    account_id = asked.get("account_id") if isinstance(asked, dict) else None
+    return account_id.strip() if isinstance(account_id, str) else ""
 
 
 @pages.page(
@@ -200,17 +275,20 @@ def _connections(notice: Notice | None = None) -> meridian.Response:
     answers=records.ConnectionsRead,
     name="read_connections",
     description=(
-        "The OANDA connection the settings name: its environment and account, whether the "
-        "access token is set (never its value), how the last read went, whether trading is "
-        "enabled on it (a new connection is read-only), and how many placements it is "
-        "working, holding back, asking OANDA about, or holding for a value date. No "
-        "account's data."
+        "The OANDA connection: its environment and account, whether the access token is set "
+        "(never its value), how the last read went, whether trading is enabled on it (a new "
+        "connection is read-only), and how many placements it is working, holding back, "
+        "asking OANDA about, or holding for a value date. And the accounts the token reaches "
+        "(reached; a v1 account unusable, with why), the one in use and whether the Account "
+        "ID setting or an admin's choice names it, and the one preselected because it is "
+        "the only usable one, not in use until choose_account confirms it. No account's data."
     ),
 )
 async def connections(request: meridian.Request) -> meridian.Response:
+    await _listed()
     if request.tool_name:
         return pages.answer("connections.html", _connections_read())
-    return _connections()
+    return _connections(request, selected=await _prepared_account(request))
 
 
 @pages.route(
@@ -275,7 +353,7 @@ async def enable_trading(request: meridian.Request) -> meridian.Response:
         return pages.answer(
             "connections.html", records.TradingEnabled(connection_id, True, said)
         )
-    return _connections(Notice(said, "good"))
+    return _connections(request, Notice(said, "good"))
 
 
 @pages.route(
@@ -303,6 +381,119 @@ async def check_enable_trading(request: meridian.Request) -> meridian.Response:
     )
     return pages.answer(
         "connections.html", records.TradingEnabled(connection_id, already, said)
+    )
+
+
+def _choice_problem(request: meridian.Request, account_id: str) -> tuple[str, str, str] | None:
+    """Why the account cannot be chosen by this person now, or None: the
+    words, the field's note and the refusal's reason."""
+    if not _may_choose(request):
+        return (
+            "Choosing the account needs admin on each of the plugin's roles, custody and "
+            "connectivity, as the Account ID setting does.",
+            "admin on custody and connectivity",
+            "permission_denied",
+        )
+    if not account_id:
+        return ("Choose the account to use.", "choose an account", "invalid_arguments")
+    return _now().connections.why_not(account_id)
+
+
+def _asked_account(request: meridian.Request) -> str:
+    asked: records.AccountAsked | None = request.params
+    return asked.account_id.strip() if asked is not None else ""
+
+
+@pages.route(
+    CHOOSE_ACCOUNT,
+    levels="admin",
+    roles=["custody", "connectivity"],
+    methods=["POST"],
+    params=records.AccountAsked,
+    answers=records.AccountChosen,
+    name="choose_account",
+    checked_by="check_choose_account",
+    made_on=CONNECTIONS,
+    description=(
+        "Choose which of the OANDA accounts the access token reaches the plugin uses, as "
+        "read_connections lists them under reached: custody reads it and connectivity "
+        "trades on it. Never made for you: an account the token alone reaches is "
+        "preselected, not chosen until this. A v1 account cannot be chosen, nor any while "
+        "the Account ID setting names one. A change of account is a new connection, "
+        "read-only until trading is enabled on it, and turns trading off on the one left, "
+        "so returning to it finds it read-only. Needs admin on custody and connectivity."
+    ),
+)
+async def choose_account(request: meridian.Request) -> meridian.Response:
+    if (too_big := _oversized(request)) is not None:
+        return too_big
+    held = _now()
+    account_id = _asked_account(request)
+    await held.connections.discover()
+    problem = _choice_problem(request, account_id)
+    if problem is not None:
+        detail, note, reason = problem
+        if request.tool_name:
+            pages.refuse(detail, ("account_id", note), reason=reason)
+        return _connections(request, Notice(detail, "warn"), selected=account_id)
+    already = held.connections.choice.account_id == account_id
+    held.connections.choose(account_id, request.caller.display_name or request.caller.subject)
+    current = held.connections.current
+    assert current is not None, "a venue, and the account just chosen"
+    held.wake.set()
+    if held.trader is not None:
+        await held.trader.publish()
+    said = (
+        f"{account_id} is the account in use already."
+        if already
+        else f"Using {account_id}: the connection {current.connection_id}, "
+        + (
+            "trading enabled on it."
+            if current.trading
+            else "read-only until trading is enabled on it."
+        )
+    )
+    if request.tool_name:
+        return pages.answer(
+            "connections.html",
+            records.AccountChosen(account_id, current.connection_id, current.trading, said),
+        )
+    return _connections(request, Notice(said, "good"))
+
+
+@pages.route(
+    CHOOSE_ACCOUNT + CHECK,
+    levels="admin",
+    roles=["custody", "connectivity"],
+    methods=["POST"],
+    params=records.AccountAsked,
+    answers=records.AccountChosen,
+    reads=True,
+    name="check_choose_account",
+    description=(
+        "Check choose_account without choosing: whether the access token reaches the "
+        "account, whether it is usable (not a v1 account), whether the Account ID setting "
+        "leaves the choice here, and the connection it would make."
+    ),
+)
+async def check_choose_account(request: meridian.Request) -> meridian.Response:
+    held = _now()
+    account_id = _asked_account(request)
+    await held.connections.discover()
+    problem = _choice_problem(request, account_id)
+    if problem is not None:
+        detail, note, reason = problem
+        pages.refuse(detail, ("account_id", note), reason=reason)
+    connection_id = f"{held.connections.environment}:{account_id}"
+    trading = held.connections.trading_on(connection_id)
+    if held.connections.choice.account_id == account_id:
+        said = f"{account_id} is the account in use already."
+    else:
+        said = f"Would use {account_id}: the connection {connection_id}, " + (
+            "trading enabled on it." if trading else "read-only until trading is enabled on it."
+        )
+    return pages.answer(
+        "connections.html", records.AccountChosen(account_id, connection_id, trading, said)
     )
 
 
@@ -669,7 +860,7 @@ async def read_now(request: meridian.Request) -> meridian.Response:
     if request.tool_name:
         return pages.answer("statements.html", records.ReadStarted(READING))
     if request.caller.admin:
-        return _connections(Notice(READING))
+        return _connections(request, Notice(READING))
     return pages.answer(
         "statements.html", _statements_read(request.caller), notice=Notice(READING)
     )

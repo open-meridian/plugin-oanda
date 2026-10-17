@@ -196,7 +196,8 @@ def run():
     for role in ("portfolio", "oms", "ems"):
         runner("grant", "--instance", "desk", "--level", "write", "--role", role, "--accounts", account)
     runner("grant", "--instance", "desk", "--level", "admin", "--role", "ems")
-    runner("grant", "--instance", "oanda", "--level", "admin", "--role", "connectivity")
+    # OANDA's connectivity admin was granted before the account was chosen
+    # (custody.py, step 2).
     eur = desk("write", "/resolve?iso4217=EUR")["instrument_id"]
     usd = desk("write", "/resolve?iso4217=USD")["instrument_id"]
     must(eur and usd, f"step 1, EUR's and USD's cash instruments: {eur}, {usd}")

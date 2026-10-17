@@ -46,6 +46,31 @@ class TradingEnabled:
 
 
 @dataclass(frozen=True)
+class AccountAsked:
+    """Which of the accounts the token reaches to use, by its v20 ID, as
+    read_connections lists it under `reached`."""
+
+    account_id: str = field(
+        default="",
+        metadata={
+            "max_length": MOST_ID,
+            "description": "the v20 account, as read_connections lists it under reached",
+        },
+    )
+
+
+@dataclass(frozen=True)
+class AccountChosen:
+    """The account in use after the action, and the connection it makes:
+    a new one is read-only."""
+
+    account_id: str
+    connection_id: str
+    trading: bool
+    said: str
+
+
+@dataclass(frozen=True)
 class ReadAsked:
     """Read OANDA now; `back` is the page a browser is answered with."""
 
@@ -97,6 +122,9 @@ class ConnectionRead(custody.ConnectionRead):
     environment: str = ""
     trading: bool = False
     trading_enabled_by: str = ""
+    # Where trading on this connection was last turned off by a switch away
+    # from it, when and why: a person enables it again on returning.
+    trading_turned_off: str = ""
     working: int = 0
     held: int = 0
     unknown: int = 0
@@ -104,9 +132,33 @@ class ConnectionRead(custody.ConnectionRead):
 
 
 @dataclass(frozen=True)
+class ReachedRead:
+    """One account the token reaches, as OANDA lists it: usable, or not and
+    why (a v1 account)."""
+
+    account_id: str
+    usable: bool = True
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class ConnectionsRead(custody.ConnectionsRead):
+    """The connection, and the account it is for: the accounts the token
+    reaches (`reached`), the one in use (`account_id`) and where it came from
+    (`account_from`: `setting`, the Account ID setting; `chosen`, an admin's
+    pick here, by `account_chosen_by`; empty, none yet), and the one
+    preselected because it is the only usable one, which is not in use until
+    an admin confirms it with choose_account."""
+
     connections: list[ConnectionRead] = field(default_factory=list)  # type: ignore[assignment]
     mode: str = ""
+    reached: list[ReachedRead] = field(default_factory=list)
+    listed: bool = False
+    listing_error: str = ""
+    account_id: str = ""
+    account_from: str = ""
+    account_chosen_by: str = ""
+    preselected: str = ""
 
 
 @dataclass(frozen=True)

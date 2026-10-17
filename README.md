@@ -7,9 +7,9 @@ for an Open Meridian deployment. The plugin holds two roles:
   OANDA and reports what OANDA did with them: acknowledgements, rejections,
   fills, financing charges and each daily value-date roll. It also reports
   fills of orders taken in OANDA's own platform or app, on no placement.
-- **`custody`**: it reads the account its settings name as the custodian's
-  view, covering the account, its sync status, a statement per read and its
-  activity.
+- **`custody`**: it reads the account chosen on Connections, or the one its
+  `account_id` setting names, as the custodian's view, covering the
+  account, its sync status, a statement per read and its activity.
 
 A `data` role, for OANDA's bid/ask quotes and a 17:00 New York daily close,
 is planned for a later version of this repository (ruled 2026-10-13).
@@ -26,7 +26,7 @@ by the deployment admin.
 |---|---|
 | `environment` | `practice` or `live`: the OANDA host the account is on. Use practice first. |
 | `token` | Secret. The personal access token made in OANDA's hub. It is never shown, logged or kept. OANDA does not keep it either: if it is lost, revoke it and make a new one. |
-| `account_id` | The v20 account, for example `101-001-1234567-001`. |
+| `account_id` | Optional. Leave it empty and choose the account on Connections, from the v20 accounts the token reaches. Given, for example `101-001-1234567-001`, it is the account, as before 0.3.0, and Connections offers no choice. |
 | `poll_seconds` | How often the account is read (custody). |
 | `stale_after_hours` | How old the last good read may be, while OANDA does not answer, before the account is reported stale. |
 | `sample_data` | Developer setting. Trades with and reads a synthetic OANDA built into the plugin, so you can develop before any token exists. Nothing reaches OANDA. |
@@ -35,13 +35,44 @@ The SDK also declares a window setting and a past-the-window setting for each
 kind of raw record: `activity` (seven years), `responses` (30 days) and
 `trading` (seven years).
 
+## Setting it up
+
+1. In OANDA's hub, make a personal access token for the account's login.
+2. On the plugin's Settings, choose the `environment` (practice first) and
+   enter the `token`. Leave `account_id` empty.
+3. On Connections, under Account, the plugin lists the v20 accounts the
+   token reaches (OANDA's `GET /v3/accounts`). A v1 account, whose ID is
+   digits only, is listed as unusable, with the reason: this plugin speaks
+   only the v20 API. Choose the account and press "Use this account". Where
+   the token reaches exactly one usable account it is preselected, but
+   nothing is read or traded until an admin confirms it. Choosing needs
+   admin on both of the plugin's roles, `custody` and `connectivity`, as the
+   `account_id` setting does. Agents use `read_connections` and
+   `choose_account` (checked by `check_choose_account`). Who chose which
+   account, and when, is kept in the plugin's storage.
+4. On Account links, link the OANDA account to one of the deployment's
+   accounts.
+5. To trade, an admin of `connectivity` enables trading on the connection
+   (below).
+
+An `account_id` setting from before 0.3.0 keeps working: while it is set, it
+is the account, and Connections lists the accounts without offering a
+choice. Clear it to choose on Connections instead.
+
 ## Trading
 
 A new connection is **read-only**. An admin of the `connectivity` role
 enables trading on it under Connections, "Enable trading". Until then, every
 placement on it is rejected `unsupported`. The connection is the
-`environment` together with the `account_id`, so changing either makes a new
-connection, which is read-only again.
+`environment` together with the account (chosen on Connections, or named by
+`account_id`), so changing either makes a new connection, which is
+read-only again. Switching away from a connection also turns trading off
+on it, whether by choosing another account on Connections or by changing
+the `account_id` or `environment` setting. Returning to it finds it
+read-only, and a person enables trading on it again: trading never comes
+back on by itself. Each time this happens it is recorded in the plugin's
+storage, with the change that caused it, who made it and when. Connections
+and `read_connections` say so for the connection in use.
 
 - **An FX order** is an order in the base currency's cash instrument, with
   its limit or stop price in the quote currency. From contract v23 the order
@@ -97,8 +128,10 @@ Activity is each transaction that moved cash, with these kinds:
 ## Proven against a released runtime
 
 `make e2e` runs the plugin on the synthetic OANDA, on the plugin harness that
-the Makefile pins beside its core. It links the account through the plugin's
-own Account links form, holds the street to `e2e/expected.street` and
+the Makefile pins beside its core. It chooses the account on Connections,
+the synthetic token's one usable account preselected and confirmed and its
+v1 account listed unusable, links it through the plugin's own Account links
+form, holds the street to `e2e/expected.street` and
 `e2e/expected.activity`, and then runs the order path with a desk stand-in
 (`e2e/desk.py`, `e2e/orders.py`): a limit and a market order filled and
 pending to their value date, an order from OANDA's app reported on no

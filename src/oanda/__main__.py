@@ -3,8 +3,11 @@ deployment (meridian-design tasks/sdk-contract/an-fx-ccm-plugin-trades-spot,
 ruled 2026-10-13).
 
 It connects to the sidecar it is launched beside, declares its settings and
-its pages, and serves them. As `custody` it reads the account the settings
-name on every poll and every settings change (custody.py): its sync status,
+its pages, and serves them. On every poll and every settings change it lists
+the accounts the token reaches, for an admin to choose from on Connections
+(connection.py). As `custody` it reads the account chosen, or the one the
+`account_id` setting names, on every poll and every settings change
+(custody.py): its sync status,
 its statement as two cash legs per open position, and its activity. As
 `connectivity` it places the placements naming it at OANDA and reports what
 OANDA did with them (trading.py), following the account's transaction
@@ -75,6 +78,8 @@ async def poll(
     while True:
         wake.clear()
         try:
+            # The accounts the token reaches, for Connections to pick from.
+            await syncer.connections.discover()
             await syncer.run_once()
             await keeper.tend(syncer.connections.config.windows)
         except meridian.MeridianError as failed:

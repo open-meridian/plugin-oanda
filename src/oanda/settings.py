@@ -8,10 +8,16 @@ dashboard's settings form, never read back, displayed, logged or kept: it
 reaches this process in `meridian.Settings` and nowhere else, `Credentials`
 keeps it out of its repr, and raw.py redacts it before anything is written.
 
-While a required one is missing the sidecar reports the plugin unhealthy,
-naming it, and the plugin says which it is waiting for. Sample data
-(`sample_data`, the SDK's developer setting) runs without them, against the
-synthetic OANDA (synthetic.py), which never reaches OANDA.
+**`account_id` is optional** from 0.3.0 (approved by the product owner,
+2026-10-14). Once the token is set, Connections lists the v20 accounts it
+reaches and an admin picks one there (`choose_account`, connection.py); an
+`account_id` given here is the choice instead, as before 0.3.0, and the
+page offers no pick while it is set.
+
+While the token is missing the sidecar reports the plugin unhealthy, naming
+it, and the plugin says it is waiting for it. Sample data (`sample_data`,
+the SDK's developer setting) runs without it, against the synthetic OANDA
+(synthetic.py), which never reaches OANDA.
 
 **The windows** (contract v16). How long each kind of raw record stays in
 storage, and what is done with it past that, are the SDK's two settings per
@@ -101,9 +107,12 @@ _VENDORS: tuple[meridian.Setting, ...] = (
         ACCOUNT_ID,
         str,
         roles=BOTH,
-        required=True,
         label="Account ID",
-        description="The v20 account, as OANDA shows it: 101-001-1234567-001.",
+        description=(
+            "Optional. Leave it empty to choose the account on Connections, from those the "
+            "token reaches. Given, it is the v20 account, as OANDA shows it: "
+            "101-001-1234567-001."
+        ),
     ),
     custody.poll_seconds(
         roles=CUSTODY_ONLY,
@@ -140,7 +149,6 @@ class Credentials:
     """What OANDA is called with. Never in a repr, a log line or a page."""
 
     token: str = field(repr=False)
-    account_id: str = ""
     environment: str = PRACTICE
 
     def secrets(self) -> tuple[str, ...]:
@@ -178,6 +186,8 @@ class Config:
 
     synthetic: bool = False
     credentials: Credentials | None = None
+    # The `account_id` setting as given: the choice where it is set, "" where
+    # the account is chosen on Connections.
     account_id: str = ""
     environment: str = PRACTICE
     # The names of the required settings not yet given, for saying so.
@@ -207,19 +217,15 @@ def _number(values: Values, name: str) -> int | None:
 
 def config_from(values: Values) -> Config:
     """The plugin's configuration from its delivered settings. The
-    credentials are complete or absent: a missing one is named, never
-    guessed, and there is no default token anywhere to fall back on."""
+    credentials are the token or absent: a missing token is named, never
+    guessed, and there is no default token anywhere to fall back on. The
+    account is not a credential: the `account_id` setting where it is given,
+    else the one an admin chooses on Connections (connection.py)."""
     environment = _text(values, ENVIRONMENT)
     environment = environment if environment in ENVIRONMENTS else PRACTICE
-    missing = tuple(name for name in (TOKEN, ACCOUNT_ID) if not _text(values, name))
+    missing = tuple(name for name in (TOKEN,) if not _text(values, name))
     credentials = (
-        None
-        if missing
-        else Credentials(
-            token=_text(values, TOKEN),
-            account_id=_text(values, ACCOUNT_ID),
-            environment=environment,
-        )
+        None if missing else Credentials(token=_text(values, TOKEN), environment=environment)
     )
     poll = _number(values, POLL_SECONDS)
     stale = _number(values, STALE_AFTER_HOURS)
