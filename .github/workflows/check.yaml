@@ -27,9 +27,8 @@ env:
   # into it. Move it deliberately, as the SDK's pin is moved, since a newer
   # one may hold a rule this plugin does not keep yet. `make check` reads it
   # from here. 0.1.46 is the first to check docs/ (documentation-sections,
-  # documentation-safe) and holds the suites of contract v25; red until it is
-  # released, and locally `make check MERIDIAN_BIN=...` tries a build of it.
-  # PLACEHOLDER (v25): meridian 0.1.46 is not released yet; it is the first to check docs/.
+  # documentation-safe) and holds the suites of contract v25. Locally `make check
+  # MERIDIAN_BIN=...` tries a build of another.
   MERIDIAN_VERSION: 0.1.46
 
 jobs:

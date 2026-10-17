@@ -27,8 +27,8 @@ first.
   connectivity's give-up case not presented (no trade is given up at
   OANDA); the two cases every suite holds answered by the SDK.
 - **The pins**: open-meridian 0.29.0 and plugin-python:0.29.0, core v25's
-  runtime and harness, and `meridian` 0.1.46 in `check.yaml`, each a marked
-  placeholder until published.
+  runtime and harness, and `meridian` 0.1.46 in `check.yaml`, each as released
+  (core abf028f, chart 0.1.306, by tag and digest).
 - **`make e2e`** takes the harness down with `--profile runner`.
 
 ## 0.3.0
