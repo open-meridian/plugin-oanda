@@ -1,7 +1,7 @@
 # OANDA for Open Meridian
 
 Spot FX through [OANDA's v20 API](https://developer.oanda.com/rest-live-v20/introduction/)
-for an Open Meridian deployment. The plugin holds two roles:
+for an Open Meridian deployment. The plugin holds three roles:
 
 - **`connectivity`** (contract v23): it places the placements that name it at
   OANDA and reports what OANDA did with them: acknowledgements, rejections,
@@ -11,12 +11,20 @@ for an Open Meridian deployment. The plugin holds two roles:
   `account_id` setting names, as the custodian's view, covering the
   account, its sync status, a statement per read and its activity.
 
-A `data` role, for OANDA's bid/ask quotes and a 17:00 New York daily close,
-is planned for a later version of this repository (ruled 2026-10-13).
+- **`data`** (from 0.5.0): it records OANDA's prices in the lake, of the
+  lake's existing kinds, prices and quotes. `live`: each currency pair's
+  best bid and ask with their liquidity, as a quote, and their mid, as a
+  price of kind `mid`, from OANDA's pricing stream for a standing want, at
+  most once a second a pair, and from a price read now for the latest; kept
+  90 days by its default terms. `daily`: each pair's close, the mid of
+  OANDA's daily candle, on its day ending at 17:00 New York (ruled
+  2026-10-13: "later, in the same repository").
 
-Version 0.4.0 (not released) is built on open-meridian 0.29.0, contract v25:
-the version's whole declaration -- its settings, pages and tools, the
-accounts it names by OANDA's IDs, its storage -- and its documentation in
+Version 0.5.0 (not released) is built on open-meridian 0.31.0, contract v26:
+the `data` role, and the environment its session reached on its venue
+catalogue, the second key of the agents' demo-only guard. Its whole
+declaration -- its settings, pages and tools, the accounts it names by
+OANDA's IDs, its storage and its catalogue -- and its documentation are in
 [docs/](docs/), which a deployment shows on the plugin's Documentation tab.
 
 OANDA is a trademark of its owner. This project is not affiliated with or
@@ -29,16 +37,19 @@ by the deployment admin.
 
 | Setting | What it is |
 |---|---|
-| `environment` | `practice` or `live`: the OANDA host the account is on. Use practice first. |
+| `environment` | The role-common setting (contract v26): `paper`, labelled Practice, OANDA's practice host, or `live`. Practice until a person chooses Live. A value saved before 0.5.0, `practice`, still reaches the practice host, but the agents' guard reads it as live until it is saved again; Connections says so. |
 | `token` | Secret. The personal access token made in OANDA's hub. It is never shown, logged or kept. OANDA does not keep it either: if it is lost, revoke it and make a new one. |
 | `account_id` | Optional. Leave it empty and choose the account on Connections, from the v20 accounts the token reaches. Given, for example `101-001-1234567-001`, it is the account, as before 0.3.0, and Connections offers no choice. |
 | `poll_seconds` | How often the account is read (custody). |
 | `stale_after_hours` | How old the last good read may be, while OANDA does not answer, before the account is reported stale. |
-| `sample_data` | Developer setting. Trades with and reads a synthetic OANDA built into the plugin, so you can develop before any token exists. Nothing reaches OANDA. |
+| `sample_data` | Developer setting. Trades with, reads and takes prices from a synthetic OANDA built into the plugin, so you can develop before any token exists. Nothing reaches OANDA. |
+
+The token, the account and the environment serve all three roles.
 
 The SDK also declares a window setting and a past-the-window setting for each
-kind of raw record: `activity` (seven years), `responses` (30 days) and
-`trading` (seven years).
+kind of raw record: `activity` (seven years), `responses` (30 days),
+`trading` (seven years) and, from 0.5.0, `pricing` (a week), what OANDA's
+pricing answered the data role.
 
 ## Setting it up
 
@@ -51,8 +62,8 @@ kind of raw record: `activity` (seven years), `responses` (30 days) and
    only the v20 API. Choose the account and press "Use this account". Where
    the token reaches exactly one usable account it is preselected, but
    nothing is read or traded until an admin confirms it. Choosing needs
-   admin on both of the plugin's roles, `custody` and `connectivity`, as the
-   `account_id` setting does. Agents use `read_connections` and
+   admin on both `custody` and `connectivity`, the roles that trade and read the
+   account. Agents use `read_connections` and
    `choose_account` (checked by `check_choose_account`). Who chose which
    account, and when, is kept in the plugin's storage.
 4. On Account links, link the OANDA account to one of the deployment's
@@ -63,6 +74,44 @@ kind of raw record: `activity` (seven years), `responses` (30 days) and
 An `account_id` setting from before 0.3.0 keeps working: while it is set, it
 is the account, and Connections lists the accounts without offering a
 choice. Clear it to choose on Connections instead.
+
+## The environment, and the agents' guard
+
+The `environment` setting is one key of the agents' demo-only guard
+(contract v26, G1): a connection is **Demo** only while the setting says
+`paper` and the environment the session reached says `paper` too. The
+plugin reads the second from the host it calls, `api-fxpractice.oanda.com`
+`paper` and `api-fxtrade.oanda.com` `live`, and publishes it on its venue
+catalogue (`VenueCatalogue.environment`). The synthetic OANDA reaches no
+venue and reports `paper`. Anything else, a mismatch among it, counts as
+live. Connections shows each connection's badge, Demo, Live, or "Live
+(environment not confirmed)".
+
+## Prices in the lake
+
+- **A pair is two cash instruments**: a row's subject is the base
+  currency's record, the one the lake asked for, its price a `Money` in the
+  quote currency, as OANDA quotes it. Nothing is inverted or crossed, so
+  the yen's own record is declined as not covered (OANDA quotes USD_JPY).
+  Only OANDA's currency pairs are served.
+- **Each currency** is resolved by its ISO 4217 code, a miss reported once;
+  a subject is named by its record's `iso4217` identifier.
+- **The venue** is OANDA, by its own name in the venue master; a venue not
+  held is reported once and each row names it as reported.
+- **Wants**: the latest of `live`, a price read now; a business date, a
+  range or the latest week of `daily`. A standing want of `live` is kept
+  current from the pricing stream, one stream for every pair kept current,
+  opened again when that changes, after a drop waiting longer each time, a
+  minute at most; one of `daily`, its forming day every five minutes.
+  Declined `not_covered`, `beyond_history` (a past range of `live`: OANDA
+  keeps no history of its quotes) or `source_silent`.
+- **A restart** cannot read back a gap in `live`: OANDA keeps no quote
+  history. The stream opens again from each pair's price now; a row is keyed
+  by the pair and OANDA's own time, so one recorded before is unchanged.
+- **Raw records**: each answer a row was read from is kept first, in the
+  kind `pricing`, the SDK's raw store, a unit a UTC day; the stream's
+  messages a row was read from as lines of the day's file per pair.
+- **Not carried**: OANDA's closeout bid and ask, counted on the heartbeat.
 
 ## Trading
 
@@ -145,8 +194,9 @@ cancel, a pause, a stop and a restart. **On a controlled clock** (decision
 66): before the order path, the e2e sets the synthetic OANDA's clock to the
 coming Tuesday at 12:00 New York, so its fills trade on a Tuesday and its
 roll is that day's 17:00, whatever day the e2e runs; the clock runs on from
-there and is only ever set forward. Until core v25 is published, run it as
-`make e2e RUNTIME_IMAGE=... HARNESS_IMAGE=...` with a local build.
+there and is only ever set forward. The Makefile pins core v26's runtime
+and harness as published (core 17a13a2, merged as 648e25f, chart 0.1.308);
+`make e2e RUNTIME_IMAGE=... HARNESS_IMAGE=...` tries another.
 
 **Safety:** tests and `make e2e` use the synthetic OANDA only. Any run on a
 real practice account is the product owner's, done by hand.

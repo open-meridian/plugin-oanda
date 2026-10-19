@@ -4,14 +4,14 @@ it keeps its state across a restart. It reaches nothing."""
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from oanda import synthetic
-from oanda.synthetic import SyntheticOanda
+from oanda.synthetic import ACCOUNT_ID, SyntheticOanda
 from oanda.venue import VenueError
 
 from conftest import NOW, Clock
@@ -134,3 +134,28 @@ def test_setting_the_clock_rolls_nothing(tmp_path: Path) -> None:
     wall.at = NOW + timedelta(hours=6)
     asyncio.run(venue.transactions_since(synthetic.ACCOUNT_ID, "0"))
     assert {t["type"] for t in venue.transactions()[before:]} == {"DAILY_FINANCING"}
+
+
+def test_its_prices_move_a_pip_a_second_and_its_candles_skip_the_weekend() -> None:
+    """The data role's synthetic prices (from 0.5.0): the same at the same
+    second, a pip either side of the mid, tradeable outside the weekend; a
+    daily candle per weekday, ending 17:00 New York, the day forming
+    incomplete. And the environment it reports: `paper`."""
+    clock = Clock(datetime(2026, 10, 13, 15, 0, tzinfo=UTC))
+    venue = SyntheticOanda(clock)
+    assert venue.environment == "paper"
+    answer = asyncio.run(venue.pricing(ACCOUNT_ID, ["EUR_USD"]))
+    (price,) = answer["prices"]
+    assert price["tradeable"] is True
+    bid, ask = Decimal(price["bids"][0]["price"]), Decimal(price["asks"][0]["price"])
+    assert ask - bid == Decimal("0.00020")
+    again = asyncio.run(venue.pricing(ACCOUNT_ID, ["EUR_USD"]))
+    assert again["prices"] == answer["prices"]
+    candles = asyncio.run(
+        venue.candles(ACCOUNT_ID, "EUR_USD", "2026-10-08T21:00:00Z", "2026-10-13T21:00:00Z")
+    )
+    assert [c["time"][:10] for c in candles] == ["2026-10-08", "2026-10-11", "2026-10-12"]
+    assert [c["complete"] for c in candles] == [True, True, False]
+    clock.at = datetime(2026, 10, 17, 15, 0, tzinfo=UTC)  # Saturday
+    (closed,) = asyncio.run(venue.pricing(ACCOUNT_ID, ["EUR_USD"]))["prices"]
+    assert closed["tradeable"] is False

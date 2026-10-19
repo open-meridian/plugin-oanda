@@ -2,8 +2,20 @@
 
 The names are the ones approved on 2026-10-13 (the spot-FX plugin's Q7):
 `token`, OANDA's personal access token, a secret setting; `account_id`, the
-v20 account it trades and reads; and `environment`, `practice` or `live`,
-which says which of OANDA's hosts it reaches. The token is set once in the
+v20 account it trades and reads; and `environment`, which says which of
+OANDA's hosts it reaches.
+
+**The environment is the role-common setting** from 0.5.0 (contract v26, G1
+question 4; `meridian.environment`): `live`, or `paper`, which the form
+labels "Practice", OANDA's own word ("OANDA's 'Practice' is `paper`",
+spec/the-fx-and-multi-asset-sample-plugins §2.6). It is one key of the
+agents' demo-only guard, which reads only the common values: a connection
+is demo while this setting says `paper` and the session reports the
+practice host (venue.py). The plugin treats anything but `live` as practice,
+OANDA's demo, so a value saved before 0.5.0 (`practice`) still reaches the
+practice host; the guard, reading core's record of the setting, counts that
+old value live until a person saves the setting again (Connections says
+so). The token is set once in the
 dashboard's settings form, never read back, displayed, logged or kept: it
 reaches this process in `meridian.Settings` and nowhere else, `Credentials`
 keeps it out of its repr, and raw.py redacts it before anything is written.
@@ -23,7 +35,8 @@ the SDK's developer setting) runs without it, against the synthetic OANDA
 storage, and what is done with it past that, are the SDK's two settings per
 kind (`<kind>_window_days`, `<kind>_past_window`), from the kinds
 declaration.py declares: `activity`, `responses` and `trading`. This module
-declares neither, and reads them as delivered (`windows_from`).
+declares neither, and reads them as delivered (`windows_from`). From 0.5.0 a
+fourth kind, `pricing`, holds what OANDA's pricing answered the data role.
 """
 
 from __future__ import annotations
@@ -42,9 +55,13 @@ POLL_SECONDS = "poll_seconds"
 STALE_AFTER_HOURS = "stale_after_hours"
 SYNTHETIC = "sample_data"
 
-PRACTICE = "practice"
+#: The environment setting's values (the role-common setting, contract v26):
+#: `live`, and `paper`, OANDA's practice.
 LIVE = "live"
-ENVIRONMENTS = (PRACTICE, LIVE)
+PAPER = "paper"
+#: OANDA's word for its demo, which names its hosts (venue.py) and keys what
+#: the plugin keeps per environment (connection.py): the setting's `paper`.
+PRACTICE = "practice"
 
 DEFAULT_POLL_SECONDS = 300
 LEAST_POLL_SECONDS = 30
@@ -55,6 +72,7 @@ DEFAULT_STALE_AFTER_HOURS = 24
 RESPONSES = "responses"
 ACTIVITY = "activity"
 TRADING = "trading"
+PRICING = "pricing"
 ARCHIVED, KEPT, DELETED = "archived", "kept", "deleted"
 PAST_WINDOW = (ARCHIVED, KEPT, DELETED)
 # Each read's raw responses: 30 days by default, at least a day.
@@ -67,34 +85,37 @@ MOST_RETENTION_DAYS = 36500
 # Each trading exchange: seven years by default, as SnapTrade's (approved
 # 2026-10-13). A default, never a claim about any rule.
 DEFAULT_TRADING_RETENTION_DAYS = 2555
+# What OANDA's pricing answered, behind each price and quote the data role
+# recorded: a week by default, since the lake keeps the rows themselves.
+DEFAULT_PRICING_RETENTION_DAYS = 7
 
 # The roles each setting serves (contract v15): the token, the account and
-# the environment serve both, since trading and reading reach the same
-# account with the same token; the reads' cadence is custody's.
-BOTH = ("custody", "connectivity")
+# the environment serve every role, since trading, reading the account and
+# reading OANDA's prices reach the same account with the same token; the
+# reads' cadence is custody's.
+EVERY_ROLE = ("custody", "connectivity", "data")
 CUSTODY_ONLY = ("custody",)
 
-_VENDORS: tuple[meridian.Setting, ...] = (
-    # The environment first, before every other setting (the role pages
-    # spec's Q12), in OANDA's own words: practice or live (approved
-    # 2026-10-13).
-    meridian.Setting(
-        ENVIRONMENT,
-        str,
-        roles=BOTH,
-        required=True,
-        label="Environment",
-        default=PRACTICE,
-        choices=(
-            meridian.Choice(PRACTICE, "Practice", "OANDA's practice host, a practice account."),
-            meridian.Choice(LIVE, "Live", "OANDA's live host, a live account."),
-        ),
-        description="Which of OANDA's hosts the account is on. Practice first.",
+# The environment first, before every other setting (the role pages spec's
+# Q12): the role-common setting, its demo `paper` labelled in OANDA's word,
+# Practice, and practice until a person chooses Live. A statement of its own,
+# as the common setting's helper is read so.
+ENVIRONMENT_SETTING = meridian.environment(
+    roles=EVERY_ROLE,
+    demo=PAPER,
+    demo_label="Practice",
+    description=(
+        "Which of OANDA's hosts the account is on: Practice, OANDA's practice host and a "
+        "practice account, or Live. Practice until a person chooses Live. Agents may place "
+        "orders only on Practice."
     ),
+)
+
+_VENDORS: tuple[meridian.Setting, ...] = (
     meridian.Setting(
         TOKEN,
         str,
-        roles=BOTH,
+        roles=EVERY_ROLE,
         required=True,
         secret=True,
         label="Access token",
@@ -106,7 +127,7 @@ _VENDORS: tuple[meridian.Setting, ...] = (
     meridian.Setting(
         ACCOUNT_ID,
         str,
-        roles=BOTH,
+        roles=EVERY_ROLE,
         label="Account ID",
         description=(
             "Optional. Leave it empty to choose the account on Connections, from those the "
@@ -133,13 +154,13 @@ _VENDORS: tuple[meridian.Setting, ...] = (
 # reads a common setting's helper inside one statement as coming before the
 # settings declared beside it.
 SAMPLE_DATA = meridian.sample_data(
-    roles=BOTH,
+    roles=EVERY_ROLE,
     description=(
-        "Trade with and read a synthetic OANDA built into the plugin instead of OANDA, to "
-        "develop against before any token exists. Nothing reaches OANDA."
+        "Trade with, read and take prices from a synthetic OANDA built into the plugin "
+        "instead of OANDA, to develop against before any token exists. Nothing reaches OANDA."
     ),
 )
-DECLARED = (*_VENDORS, SAMPLE_DATA)
+DECLARED = (ENVIRONMENT_SETTING, *_VENDORS, SAMPLE_DATA)
 
 Values = Mapping[str, str | int | bool | list[dict[str, str]]]
 
@@ -170,14 +191,19 @@ class Window:
 
 @dataclass(frozen=True)
 class Windows:
-    """The three kinds' windows (contract v16)."""
+    """The four kinds' windows (contract v16)."""
 
     responses: Window = Window(DEFAULT_RAW_RETENTION_DAYS, KEPT)
     activity: Window = Window(DEFAULT_ACTIVITY_RETENTION_DAYS, KEPT)
     trading: Window = Window(DEFAULT_TRADING_RETENTION_DAYS, KEPT)
+    pricing: Window = Window(DEFAULT_PRICING_RETENTION_DAYS, KEPT)
 
     def of(self, kind: str) -> Window:
-        return {RESPONSES: self.responses, TRADING: self.trading}.get(kind, self.activity)
+        return {
+            RESPONSES: self.responses,
+            TRADING: self.trading,
+            PRICING: self.pricing,
+        }.get(kind, self.activity)
 
 
 @dataclass(frozen=True)
@@ -189,7 +215,11 @@ class Config:
     # The `account_id` setting as given: the choice where it is set, "" where
     # the account is chosen on Connections.
     account_id: str = ""
+    # OANDA's host, in its words: practice or live.
     environment: str = PRACTICE
+    # The environment setting's value as delivered, the guard's first key:
+    # `paper` or `live`, or a value saved before 0.5.0 (`practice`).
+    environment_setting: str = PAPER
     # The names of the required settings not yet given, for saying so.
     missing: tuple[str, ...] = ()
     poll_seconds: int = DEFAULT_POLL_SECONDS
@@ -221,8 +251,10 @@ def config_from(values: Values) -> Config:
     guessed, and there is no default token anywhere to fall back on. The
     account is not a credential: the `account_id` setting where it is given,
     else the one an admin chooses on Connections (connection.py)."""
-    environment = _text(values, ENVIRONMENT)
-    environment = environment if environment in ENVIRONMENTS else PRACTICE
+    # Anything but live is OANDA's practice host (meridian.environment's
+    # rule): never Live because a value went missing or is from before 0.5.0.
+    setting = _text(values, ENVIRONMENT) or PAPER
+    environment = LIVE if setting == LIVE else PRACTICE
     missing = tuple(name for name in (TOKEN,) if not _text(values, name))
     credentials = (
         None if missing else Credentials(token=_text(values, TOKEN), environment=environment)
@@ -234,6 +266,7 @@ def config_from(values: Values) -> Config:
         credentials=credentials,
         account_id=_text(values, ACCOUNT_ID),
         environment=environment,
+        environment_setting=setting,
         missing=missing,
         poll_seconds=DEFAULT_POLL_SECONDS if poll is None else max(poll, LEAST_POLL_SECONDS),
         stale_after=timedelta(
@@ -261,6 +294,7 @@ def windows_from(values: Values) -> Windows:
         responses=_window(values, RESPONSES, DEFAULT_RAW_RETENTION_DAYS),
         activity=_window(values, ACTIVITY, DEFAULT_ACTIVITY_RETENTION_DAYS),
         trading=_window(values, TRADING, DEFAULT_TRADING_RETENTION_DAYS),
+        pricing=_window(values, PRICING, DEFAULT_PRICING_RETENTION_DAYS),
     )
 
 

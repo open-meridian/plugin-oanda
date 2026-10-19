@@ -343,6 +343,9 @@ class Syncer:
         self._pairs = pairs
         self._linked = linked
         self.status = Status()
+        # Another role's figures, after custody's on the Summary (the data
+        # role's, from 0.5.0), where the plugin holds it.
+        self.more_figures: Callable[[], list[meridian.Figure]] | None = None
         # The transactions taken for activity in this process, by account:
         # from 0 (the backfill) on the first read.
         self._since: dict[str, str] = {}
@@ -786,4 +789,4 @@ class Syncer:
             connections=1 if connection is not None else 0,
             accounts_reached=1 if status.account else 0,
             last_read=last,
-        )
+        ) + (self.more_figures() if self.more_figures is not None else [])

@@ -36,12 +36,21 @@ def test_the_declaration_carries_its_pages_tools_and_documentation(
     declared = printed(monkeypatch, capsys)
     assert isinstance(declared, dict)
     assert [page["title"] for page in declared["interface"]["pages"]] == [
+        "Connection",
+        "Datasets",
         "Connections",
         "Account links",
         "Statements",
         "Raw records",
     ]
     assert declared["tools"], "the tools its typed routes make"
+    # The data role's catalogue (from 0.5.0): prices and quotes only.
+    catalogue = {dataset["key"]: dataset for dataset in declared["catalogue"]["datasets"]}
+    assert sorted(catalogue) == ["daily", "live"]
+    assert catalogue["live"]["data_types"] == ["meridian.v1.Price", "meridian.v1.Quote"]
+    assert catalogue["daily"]["data_types"] == ["meridian.v1.Price"]
+    assert catalogue["live"]["licence_default"]["kept"] is True
+    assert catalogue["live"]["licence_default"]["retention_days"] == 90
     sections = declared["documentation"]
     assert [section["name"] for section in sections] == SECTIONS
     for section in sections:

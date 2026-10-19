@@ -4,13 +4,22 @@ to OANDA, and the shape synthetic.py stands in for.
 `Venue` is what the plugin asks of OANDA: the accounts the token reaches, an
 account with its open trades and positions, its tradeable instruments, its
 transactions since an ID, the transaction stream, and an order placed, read,
-cancelled or replaced. `Oanda` answers it from OANDA's hosts, practice or
-live as the `environment` setting says
+cancelled or replaced; and from 0.5.0, for the data role, the account's
+prices now, its daily candles and its pricing stream
+(https://developer.oanda.com/rest-live-v20/pricing-ep/). `Oanda` answers it
+from OANDA's hosts, practice or live as the `environment` setting says
 (https://developer.oanda.com/rest-live-v20/introduction/), with the
 personal access token as a Bearer token and nothing else of the deployment's
 (https://developer.oanda.com/rest-live-v20/authentication/). It uses the
 standard library alone, each call in a thread so the plugin's event loop
 never waits on one.
+
+**The environment its session reached** (contract v26, G1 question 5):
+`environment` is read from the host it calls, `api-fxpractice.oanda.com`
+`paper` and `api-fxtrade.oanda.com` `live`
+(`meridian.reached_environment`), and is published on the venue catalogue
+(trading.py): the second key of the agents' demo-only guard, which counts a
+connection demo only while the setting and this both say `paper`.
 
 **SAFETY.** Nothing in this repository's tests or `make e2e` constructs
 `Oanda`: they trade and read the synthetic OANDA only (synthetic.py). A
@@ -38,9 +47,11 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from decimal import Decimal
 from typing import Any, Protocol
+
+import meridian
 
 Json = dict[str, Any]
 
@@ -49,6 +60,12 @@ HOSTS = {
     "practice": ("https://api-fxpractice.oanda.com", "https://stream-fxpractice.oanda.com"),
     "live": ("https://api-fxtrade.oanda.com", "https://stream-fxtrade.oanda.com"),
 }
+#: The REST hosts by the environment a session reaching them reports.
+LIVE_HOSTS = ("api-fxtrade.oanda.com",)
+PRACTICE_HOSTS = ("api-fxpractice.oanda.com",)
+
+#: The most candles OANDA answers one request with (its `count`'s bound).
+MOST_CANDLES = 5000
 
 #: How long one REST call may take, and how long the stream may stay silent
 #: (OANDA sends a heartbeat every five seconds) before it is taken for lost.
@@ -94,6 +111,10 @@ class VenueError(Exception):
 
 class Venue(abc.ABC):
     """What the plugin asks of OANDA (above)."""
+
+    #: The environment the session reached, read from the host it calls:
+    #: `live`, `paper`, or empty where it is neither of OANDA's hosts.
+    environment: str = ""
 
     @abc.abstractmethod
     async def accounts(self) -> list[Json]:
@@ -141,6 +162,31 @@ class Venue(abc.ABC):
         as it happens, and a heartbeat (`type` HEARTBEAT) every few
         seconds; it ends, or raises VenueError, when the connection does."""
 
+    @abc.abstractmethod
+    async def pricing(self, account_id: str, instruments: Sequence[str]) -> Json:
+        """GET /v3/accounts/{accountID}/pricing: each instrument's price now
+        (`prices`, each a PRICE: its `time`, `bids` and `asks` with their
+        `liquidity`, `tradeable`), and the answer's `time`."""
+
+    @abc.abstractmethod
+    async def candles(
+        self, account_id: str, instrument: str, from_time: str, to_time: str
+    ) -> list[Json]:
+        """GET /v3/accounts/{accountID}/instruments/{instrument}/candles: the
+        instrument's daily mid candles (`price` M, `granularity` D) from
+        `from_time` to `to_time`, RFC 3339, oldest first; each day ends at
+        17:00 New York, OANDA's default alignment, and the day still forming
+        is `complete` false."""
+
+    @abc.abstractmethod
+    def pricing_stream(
+        self, account_id: str, instruments: Sequence[str]
+    ) -> AsyncIterator[Json]:
+        """GET /v3/accounts/{accountID}/pricing/stream: each instrument's
+        price as it changes, starting from its price now, and a heartbeat
+        (`type` HEARTBEAT) every five seconds; it ends, or raises
+        VenueError, when the connection does."""
+
 
 class _Response(Protocol):
     status: int
@@ -169,6 +215,9 @@ class Oanda(Venue):
         self._token = token
         self._rest, self._streams = HOSTS[environment]
         self._open = opener
+        self.environment = meridian.reached_environment(
+            self._rest, live=LIVE_HOSTS, paper=PRACTICE_HOSTS
+        )
 
     def __repr__(self) -> str:
         return f"Oanda({self._rest})"
@@ -286,15 +335,53 @@ class Oanda(Venue):
         )
 
     async def stream(self, account_id: str) -> AsyncIterator[Json]:
-        """The transaction stream, read in a thread a line at a time and
-        handed to the loop; a silence past STREAM_SILENCE_SECONDS, or the
-        connection's end, ends it."""
-        loop = asyncio.get_running_loop()
-        lines: asyncio.Queue[Json | BaseException | None] = asyncio.Queue()
-        stop = threading.Event()
+        """The transaction stream (`_lines`)."""
         request = self._request(
             "GET", self._streams, f"/v3/accounts/{_id(account_id)}/transactions/stream"
         )
+        async for line in self._lines("streaming transactions", request):
+            yield line
+
+    async def pricing(self, account_id: str, instruments: Sequence[str]) -> Json:
+        return await self._call(
+            "reading prices",
+            "GET",
+            f"/v3/accounts/{_id(account_id)}/pricing",
+            {"instruments": ",".join(instruments)},
+        )
+
+    async def candles(
+        self, account_id: str, instrument: str, from_time: str, to_time: str
+    ) -> list[Json]:
+        said = await self._call(
+            "reading candles",
+            "GET",
+            f"/v3/accounts/{_id(account_id)}/instruments/"
+            f"{urllib.parse.quote(instrument, safe='_')}/candles",
+            {"price": "M", "granularity": "D", "from": from_time, "to": to_time},
+        )
+        return [c for c in said.get("candles") or [] if isinstance(c, dict)]
+
+    async def pricing_stream(
+        self, account_id: str, instruments: Sequence[str]
+    ) -> AsyncIterator[Json]:
+        """The pricing stream (`_lines`), from each instrument's price now."""
+        request = self._request(
+            "GET",
+            self._streams,
+            f"/v3/accounts/{_id(account_id)}/pricing/stream",
+            {"instruments": ",".join(instruments), "snapshot": "true"},
+        )
+        async for line in self._lines("streaming prices", request):
+            yield line
+
+    async def _lines(self, asked: str, request: urllib.request.Request) -> AsyncIterator[Json]:
+        """A stream, read in a thread a line at a time and handed to the
+        loop; a silence past STREAM_SILENCE_SECONDS, or the connection's end,
+        ends it."""
+        loop = asyncio.get_running_loop()
+        lines: asyncio.Queue[Json | BaseException | None] = asyncio.Queue()
+        stop = threading.Event()
 
         def read() -> None:
             try:
@@ -312,13 +399,9 @@ class Oanda(Venue):
                     answer.close()
                 loop.call_soon_threadsafe(lines.put_nowait, None)
             except urllib.error.HTTPError as failed:
-                loop.call_soon_threadsafe(
-                    lines.put_nowait, VenueError("streaming transactions", failed.code)
-                )
+                loop.call_soon_threadsafe(lines.put_nowait, VenueError(asked, failed.code))
             except (urllib.error.URLError, OSError, TimeoutError):
-                loop.call_soon_threadsafe(
-                    lines.put_nowait, VenueError("streaming transactions")
-                )
+                loop.call_soon_threadsafe(lines.put_nowait, VenueError(asked))
 
         reader = threading.Thread(target=read, name="oanda-stream", daemon=True)
         reader.start()

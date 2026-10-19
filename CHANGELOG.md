@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.5.0
+
+On SDK 0.31.0 and contract v26, the v26 build's plugin step (plans/the-v26-build
+§8): the `data` role, before the FX sample ships, and the environment the
+session reached on the venue catalogue, for the agents' demo-only guard
+(spec/the-contract-gaps-v26-and-v27-close, G1).
+
+- **The `data` role** (`lake.py`), a third role beside `custody` and
+  `connectivity` (ruled 2026-10-13: "later, in the same repository"), on the
+  SDK's data-role helpers (`meridian.roles.data`: wants, standing wants,
+  recording in the lake's batches, licences, the venue resolved once; the
+  raw records in `meridian.edge.RawStore`). Two datasets, of the lake's
+  existing kinds, prices and quotes:
+  - `live`: each currency pair's best bid and ask with their liquidity, as a
+    quote, and their mid, as a price of kind `mid`, from OANDA's pricing:
+    read now for the latest, and from OANDA's pricing stream for a standing
+    want, at most once a second a pair. A price OANDA says is not tradeable
+    is `halted`. Kept by its default terms for 90 days, for TCA's look-back
+    (spec/the-fx-and-multi-asset-sample-plugins §1.5), the deployment's to
+    change.
+  - `daily`: each pair's close, the mid of OANDA's daily candle, on its day
+    ending at 17:00 New York; the forming day restated.
+  A row's subject is the base currency's record, its price in the quote
+  currency, as OANDA quotes the pair: never inverted or crossed. Declines:
+  `not_covered`, `beyond_history` (a past range of `live`: OANDA keeps no
+  quote history, so a restart's gap is not read back) and `source_silent`.
+- **Its pages**: the data role's **Connection** (`/`, `read_connection`) and
+  **Datasets** (`/datasets`, `read_datasets`), at admin, the SDK's records
+  and templates for a venue listing pairs, Connection extended with the
+  environment and the guard's badge. **Statements moves to `/statements`**.
+- **The environment** is the role-common setting (`meridian.environment`,
+  `demo="paper"`): `paper`, labelled Practice, or `live`, serving all three
+  roles. A value saved before 0.5.0, `practice`, still reaches the practice
+  host; the guard reads it as live until it is saved again, and Connections
+  says so.
+- **The session's reported environment** (contract v26, W11.20): read from
+  OANDA's host, `api-fxpractice` `paper` and `api-fxtrade` `live`, published
+  on the venue catalogue (`VenueCatalogue.environment`); the synthetic OANDA
+  reports `paper`. Connections and Connection show each connection's badge,
+  Demo, Live, or "Live (environment not confirmed)".
+- **The raw-record kind `pricing`**, a week by default, moved past its window
+  by the same pass as the other three; a pricing record is followed from a
+  row's reference on Raw records. Not carried: OANDA's closeout bid and ask.
+- **One stream** hears the lake's wants and the book's placements and
+  instructions; placements heard before trading starts are left to its
+  start's reads.
+- **The suites**: the data suite (`tests/test_lake.py`), every case mapped or
+  not presented with why; the v26 cases of the custody and connectivity
+  suites pass as before.
+- **The pins**: open-meridian 0.31.0 and plugin-python:0.31.0, core v26's
+  runtime and harness (core 17a13a2, merged as 648e25f, chart 0.1.308, by tag
+  and digest), and `meridian` 0.1.48 in `check.yaml`.
+
 ## 0.4.0 (2026-10-19)
 
 On SDK 0.29.0 and contract v25 (sdk-contract/plugins-are-shared-and-

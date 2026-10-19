@@ -17,7 +17,8 @@ must already be launched, its roles approved by a deployment admin.
 **Manage → Settings.**
 
 1. **Environment**, first: Practice or Live, the OANDA host the account is
-   on. Practice by default.
+   on. Practice by default. Agents may place orders only on Practice. If
+   Connections says the setting was saved before 0.5.0, save it again.
 2. **Access token**: the token from OANDA's hub. A secret setting: it shows
    only "set" or "not set", and is never shown, logged or kept.
 3. **Account ID**: leave it empty, to choose the account on Connections.
@@ -30,8 +31,10 @@ must already be launched, its roles approved by a deployment admin.
 **Manage → Connections**, under Account: the v20 accounts the token reaches.
 Choose one and press **Use this account**. Where the token reaches exactly
 one usable account it is preselected, but nothing is read or traded until an
-admin confirms it. Choosing needs admin on both of the plugin's roles. Who
-chose which account, and when, is kept in the plugin's storage.
+admin confirms it. Choosing needs admin on both the custody and the
+connectivity role. Who
+chose which account, and when, is kept in the plugin's storage. The data
+role reads OANDA's prices for this account too.
 
 An Account ID entered in Settings is the account while it is set, and
 Connections offers no choice; clear it to choose on Connections.
@@ -53,8 +56,18 @@ Each such change is recorded with who made it and when.
 Then your execution plugin's admin maps the account the desk trades to the
 code this plugin names it by.
 
+## 5. Prices in the lake, only if a plugin reads them
+
+A deployment admin licenses the `live` and `daily` datasets and entitles
+the plugins that read them, on **Data sources**. Their default terms keep
+the rows (`live` for 90 days); the deployment admin confirms or changes
+them there, under OANDA's terms. **Manage → Datasets** then shows what each
+records and the wants it answers.
+
 ## Sample data
 
-On a development deployment, **Sample data** trades with and reads a
-simulated OANDA built into the plugin, so it can be tried before any token
-exists. Nothing reaches OANDA.
+On a development deployment, **Sample data** trades with, reads and takes
+prices from a simulated OANDA built into the plugin, so it can be tried
+before any token exists. Nothing reaches OANDA. The simulated OANDA reports
+the practice environment, so with the Environment on Practice its
+connection is Demo.

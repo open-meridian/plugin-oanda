@@ -125,7 +125,11 @@ what OANDA's order endpoint takes for its account (ReportVenueCatalogue):
 market (FOK, IOC), limit and stop (GTC, GTD, day as OANDA's GFD, FOK, IOC),
 none while the connection is read-only; never a strategy (OANDA has no
 algorithms); and no execution acknowledgement
-(`EXECUTION_ACKNOWLEDGEMENT_NONE`): OANDA's v20 API takes none.
+(`EXECUTION_ACKNOWLEDGEMENT_NONE`): OANDA's v20 API takes none. From 0.5.0
+(contract v26) it carries the environment the session reached, read from
+OANDA's host (`paper` for api-fxpractice, `live` for api-fxtrade; venue.py),
+the second key of the agents' demo-only guard, published again whenever it
+changes.
 
 **Tests and `make e2e` trade only with the synthetic OANDA**
 (synthetic.py). Never OANDA's practice or live hosts.
@@ -389,7 +393,13 @@ class Trader:
         self.decided: set[str] = set()
         self.outside: set[str] = set()
         self.watermark: ops.Watermark | None = None
-        self.published: dict[str, tuple[tuple[int, tuple[int, ...]], ...]] = {}
+        self.published: dict[str, tuple[tuple[tuple[int, tuple[int, ...]], ...], str]] = {}
+        # Whether placements and instructions heard before start are left to
+        # start's own reads (`waits_to_start`, set where the plugin hears them
+        # on a stream opened before there is a connection), and whether it
+        # has started.
+        self.waits_to_start = False
+        self.started = False
         self.shown = Shown()
         self._lock = asyncio.Lock()
         self._said: set[str] = set()
@@ -509,12 +519,16 @@ class Trader:
         placement: ops.Placement = heard.message.placement
         if placement.connectivity_instance_id != self.me:
             return
+        if self.waits_to_start and not self.started:
+            return  # start reads the book's placements itself
         async with self._lock:
             await self._resume(placement, None, ())
             await self._take_transactions()
 
     async def on_instruction(self, heard: Any) -> None:
         instruction: ops.TradingInstruction = heard.message.instruction
+        if self.waits_to_start and not self.started:
+            return  # start reads the instructions in force itself
         async with self._lock:
             self._hold(instruction)
             if instruction.value == ops.TRADING_INSTRUCTION_VALUE_STOP:
@@ -1905,7 +1919,8 @@ class Trader:
         if connection is None:
             return
         offered = self.catalogue(connection)
-        if self.published.get(connection.code) == offered:
+        environment = connection.venue.environment
+        if self.published.get(connection.code) == (offered, environment):
             return
         stated_at = moments.of(self._now())
         await self._plugin.report_venue_catalogue(
@@ -1920,9 +1935,11 @@ class Trader:
                     for kind, tifs in offered
                 ],
                 execution_acknowledgement=ops.EXECUTION_ACKNOWLEDGEMENT_NONE,
+                # The environment the session reached (contract v26, W11.20).
+                environment=environment,
             )
         )
-        self.published[connection.code] = offered
+        self.published[connection.code] = (offered, environment)
 
     # ── Raw records ─────────────────────────────────────────────────────
 
@@ -1972,18 +1989,25 @@ class Trader:
                 log.warning("a streamed transaction was not taken: %s", failure)
             await asyncio.sleep(2)
 
-    async def run(self, poll_seconds: Callable[[], int]) -> None:
+    async def run(self, poll_seconds: Callable[[], int], hears: bool = True) -> None:
         """Start, hear placements and instructions, follow the stream and
-        poll until cancelled."""
+        poll until cancelled. Where `hears` is false the plugin hears them on
+        a stream of its own (with the data role, the one that hears the
+        lake's wants), and those heard before start are left to start's
+        reads, which come after them."""
         while self._connection() is None:
             await asyncio.sleep(1)
-        await self.start()
+        async with self._lock:
+            self.started = True
+            await self.start()
         hearing = asyncio.create_task(
             self._plugin.receive(
                 placement_updated=self.on_placement,
                 trading_instruction_changed=self.on_instruction,
                 seed=False,
             )
+            if hears
+            else asyncio.Event().wait()
         )
         following = asyncio.create_task(self.follow())
         try:
