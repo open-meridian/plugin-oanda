@@ -13,7 +13,7 @@
 {% if notice %}{{ kit.notice(notice) }}{% endif %}
 {% if waiting %}<div class="notice warn" role="status">Waiting for its settings: {{ waiting|join(", ") }}.</div>
 {%- elif not data.account_id and data.listed %}<div class="notice warn" role="status">Waiting for the account: choose it under Account below. Nothing is read or traded until an admin does.</div>{% endif %}
-{% if data.environment_to_save %}<div class="notice warn" role="status">The Environment setting holds "{{ data.environment_to_save }}", saved before this version: the agents' guard reads it as live. Save it again in Settings, as Practice or Live.</div>{% endif %}
+{% if data.environment_to_save %}<div class="notice warn" role="status">Environment was saved as "{{ data.environment_to_save }}", no longer offered: save it again in Settings. Until then it counts as Live for agents.</div>{% endif %}
 {% if data.mode %}<p class="hint">Reaching: {{ data.mode }}.</p>{% endif %}
 {% endblock %}
 {% block vendor_columns %}

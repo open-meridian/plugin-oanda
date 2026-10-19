@@ -7,19 +7,21 @@ SIMULATED ONLY: nothing here reaches OANDA, practice or live.
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import meridian
 from meridian import edge
 from meridian.plugin.v1 import operations_pb2 as ops
 from meridian.suites import Recorder
+from meridian.v1 import sidecar_pb2
 
-from oanda import moments, synthetic
+from oanda import moments, settings, synthetic
 from oanda.connection import Connection, Connections
 from oanda.custody import Syncer
 from oanda.kept import Kept
@@ -449,6 +451,41 @@ def want(
         standing=standing,
         valid_from_ns=valid_from_ns,
     )
+
+
+class Delivered:
+    """The sidecar's WatchSettings, stood in for: each delivery as the
+    deployment's settings store holds the values, as saved."""
+
+    def __init__(self, *saved: dict[str, str]) -> None:
+        self.saved = saved
+
+    async def _stream(self) -> AsyncIterator[sidecar_pb2.SettingsDelivery]:
+        for values in self.saved:
+            yield sidecar_pb2.SettingsDelivery(
+                values=[sidecar_pb2.SettingValue(name=k, value=v) for k, v in values.items()]
+            )
+
+    def WatchSettings(self, request: object) -> AsyncIterator[sidecar_pb2.SettingsDelivery]:  # noqa: N802
+        return self._stream()
+
+
+def delivered(*saved: dict[str, str]) -> list[meridian.Settings]:
+    """The settings as the SDK's own `plugin.settings()` delivers them: each
+    saved value read by the declaration, as the running plugin reads it."""
+    plugin = meridian.Plugin(
+        identity=cast(Any, None),
+        grants=cast(Any, None),
+        _channel=cast(Any, None),
+        _stub=cast(Any, Delivered(*saved)),
+        _operations_stub=cast(Any, None),
+        _declared=settings.DECLARED,
+    )
+
+    async def every() -> list[meridian.Settings]:
+        return [now async for now in plugin.settings()]
+
+    return asyncio.run(every())
 
 
 def report_of(recorder: Recorder) -> list[Any]:

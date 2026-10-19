@@ -69,7 +69,7 @@ async def watch_settings(
     wake: asyncio.Event,
 ) -> None:
     async for delivered in plugin.settings():
-        connections.configure(config_from(delivered.values))
+        connections.configure(config_from(delivered.values, delivered.refused))
         configured.set()
         wake.set()
         await keeper.tend(connections.config.windows)

@@ -158,9 +158,10 @@ class ConnectionsRead(custody.ConnectionsRead):
 
     connections: list[ConnectionRead] = field(default_factory=list)  # type: ignore[assignment]
     mode: str = ""
-    # The Environment setting's value, where it is one saved before 0.5.0
-    # (`practice`), which the agents' guard reads as live until it is saved
-    # again; empty otherwise.
+    # The Environment setting's saved value where this version cannot read it
+    # (`practice`, from before 0.5.0): the SDK delivers it unset (0.31.1), and
+    # the agents' guard counts the connection live until it is saved again;
+    # empty otherwise.
     environment_to_save: str = ""
     reached: list[ReachedRead] = field(default_factory=list)
     listed: bool = False

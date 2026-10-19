@@ -12,10 +12,13 @@ spec/the-fx-and-multi-asset-sample-plugins §2.6). It is one key of the
 agents' demo-only guard, which reads only the common values: a connection
 is demo while this setting says `paper` and the session reports the
 practice host (venue.py). The plugin treats anything but `live` as practice,
-OANDA's demo, so a value saved before 0.5.0 (`practice`) still reaches the
-practice host; the guard, reading core's record of the setting, counts that
-old value live until a person saves the setting again (Connections says
-so). The token is set once in the
+OANDA's demo. A value saved before 0.5.0 (`practice`) is no longer one of
+the setting's choices: from SDK 0.31.1 it is refused and delivered unset
+(`Settings.refused`), never mapped to another value (with SDK 0.31.0 it
+stopped the settings stream: 0.5.0's fault, fixed in 0.5.1). Unset, the
+environment is neither live nor paper: the plugin reaches OANDA's practice
+host, never the live one, the agents' guard counts the connection live, and
+Connections asks for the setting to be saved again. The token is set once in the
 dashboard's settings form, never read back, displayed, logged or kept: it
 reaches this process in `meridian.Settings` and nowhere else, `Credentials`
 keeps it out of its repr, and raw.py redacts it before anything is written.
@@ -41,9 +44,10 @@ fourth kind, `prices`, holds what OANDA's pricing answered the data role.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
+from typing import Any
 
 import meridian
 from meridian.roles import custody
@@ -218,8 +222,12 @@ class Config:
     # OANDA's host, in its words: practice or live.
     environment: str = PRACTICE
     # The environment setting's value as delivered, the guard's first key:
-    # `paper` or `live`, or a value saved before 0.5.0 (`practice`).
+    # `paper` or `live`, or empty where none was delivered (a saved value the
+    # SDK refused).
     environment_setting: str = PAPER
+    # A saved Environment the SDK refused (0.31.1), as saved: `practice`,
+    # from before 0.5.0; empty otherwise.
+    environment_refused: str = ""
     # The names of the required settings not yet given, for saying so.
     missing: tuple[str, ...] = ()
     poll_seconds: int = DEFAULT_POLL_SECONDS
@@ -245,16 +253,27 @@ def _number(values: Values, name: str) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def config_from(values: Values) -> Config:
+def config_from(values: Values, refused: Sequence[Any] = ()) -> Config:
     """The plugin's configuration from its delivered settings. The
     credentials are the token or absent: a missing token is named, never
     guessed, and there is no default token anywhere to fall back on. The
     account is not a credential: the `account_id` setting where it is given,
     else the one an admin chooses on Connections (connection.py)."""
     # Anything but live is OANDA's practice host (meridian.environment's
-    # rule): never Live because a value went missing or is from before 0.5.0.
-    setting = _text(values, ENVIRONMENT) or PAPER
+    # rule): never Live because a value went missing or was refused. The
+    # setting as delivered is the guard's first key, empty where the SDK
+    # refused the saved value (`refused`, its `meridian.RefusedSetting`s):
+    # neither live nor paper.
+    setting = _text(values, ENVIRONMENT)
     environment = LIVE if setting == LIVE else PRACTICE
+    unread = next(
+        (
+            str(getattr(r, "value", ""))
+            for r in refused
+            if getattr(r, "name", "") == ENVIRONMENT
+        ),
+        "",
+    )
     missing = tuple(name for name in (TOKEN,) if not _text(values, name))
     credentials = (
         None if missing else Credentials(token=_text(values, TOKEN), environment=environment)
@@ -267,6 +286,7 @@ def config_from(values: Values) -> Config:
         account_id=_text(values, ACCOUNT_ID),
         environment=environment,
         environment_setting=setting,
+        environment_refused=unread,
         missing=missing,
         poll_seconds=DEFAULT_POLL_SECONDS if poll is None else max(poll, LEAST_POLL_SECONDS),
         stale_after=timedelta(
