@@ -18,7 +18,9 @@ must already be launched, its roles approved by a deployment admin.
 
 1. **Environment**, first: Practice or Live, the OANDA host the account is
    on. Practice by default. Agents may place orders only on Practice. If
-   Connections says the setting was saved before 0.5.0, save it again.
+   Connections says the Environment was saved as a value this version no
+   longer offers (`practice`, from before 0.5.0), save it again: until then
+   the plugin reaches the practice host and agents may not place orders.
 2. **Access token**: the token from OANDA's hub. A secret setting: it shows
    only "set" or "not set", and is never shown, logged or kept.
 3. **Account ID**: leave it empty, to choose the account on Connections.

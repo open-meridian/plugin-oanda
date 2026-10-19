@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.1
+
+A fix to 0.5.0: an Environment saved before 0.5.0 no longer stops the plugin.
+
+- **On SDK 0.31.1** (open-meridian 0.31.1, plugin-python:0.31.1). An
+  Environment saved before 0.5.0, `practice`, is no longer one of the
+  setting's choices. With SDK 0.31.0 the SDK's settings stream raised on it
+  (`plugin.settings()`), before `config_from` ran, so 0.5.0 stopped there;
+  0.5.0's test handed `config_from` the value directly and missed it. With
+  0.31.1 the SDK delivers it unset and lists it in `Settings.refused`.
+- **What a refused Environment means**: it is neither live nor paper. The
+  plugin reaches OANDA's practice host, never the live one; the agents'
+  guard counts the connection live, its badge "Live (environment not
+  confirmed)"; and Connections says the Environment was saved as
+  `practice`, which this version no longer offers, and to save it again
+  (`environment_to_save`). The data role's Connection shows the Environment
+  as "Not set: save it again".
+- **Tests** drive the SDK's own `plugin.settings()` with a saved `practice`,
+  through to `config_from`, Connections and the badge, and with the value
+  saved again as Practice, which is Demo.
+- `meridian` stays at 0.1.49 in `check.yaml`.
+
 ## 0.5.0
 
 On SDK 0.31.0 and contract v26, the v26 build's plugin step (plans/the-v26-build
@@ -32,9 +54,10 @@ session reached on the venue catalogue, for the agents' demo-only guard
   environment and the guard's badge. **Statements moves to `/statements`**.
 - **The environment** is the role-common setting (`meridian.environment`,
   `demo="paper"`): `paper`, labelled Practice, or `live`, serving all three
-  roles. A value saved before 0.5.0, `practice`, still reaches the practice
-  host; the guard reads it as live until it is saved again, and Connections
-  says so.
+  roles. *Corrected in 0.5.1:* this entry said a value saved before 0.5.0,
+  `practice`, still reached the practice host. It did not: on SDK 0.31.0 the
+  SDK's settings stream raised on it, so the plugin never configured itself.
+  See 0.5.1.
 - **The session's reported environment** (contract v26, W11.20): read from
   OANDA's host, `api-fxpractice` `paper` and `api-fxtrade` `live`, published
   on the venue catalogue (`VenueCatalogue.environment`); the synthetic OANDA

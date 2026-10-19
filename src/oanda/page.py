@@ -174,8 +174,9 @@ def _reached() -> str:
 
 
 def _environment_shown(setting: str) -> str:
-    """The Environment setting as its form labels it."""
-    return {PAPER: "Practice", LIVE: "Live"}.get(setting, f"{setting} (save it again)")
+    """The Environment setting as its form labels it; one the SDK refused,
+    delivered unset, as not set."""
+    return {PAPER: "Practice", LIVE: "Live"}.get(setting, "Not set: save it again")
 
 
 def _badge() -> str:
@@ -185,10 +186,14 @@ def _badge() -> str:
 
 
 def _legacy_setting() -> str:
-    """The Environment setting's value where it is one saved before 0.5.0,
-    which the agents' guard reads as live; empty otherwise."""
-    setting = _now().connections.config.environment_setting
-    return "" if setting in (PAPER, LIVE) else setting
+    """The Environment setting's saved value where this version cannot read it
+    (`practice`, from before 0.5.0): the SDK delivers it unset, and the
+    agents' guard counts the connection live until it is saved again; empty
+    otherwise."""
+    config = _now().connections.config
+    if config.environment_refused:
+        return config.environment_refused
+    return "" if config.environment_setting in (PAPER, LIVE) else config.environment_setting
 
 
 # ── The data role's Connection and Datasets, at admin ──────────────────────

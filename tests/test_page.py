@@ -17,7 +17,7 @@ from oanda.linking import Links
 from oanda.pairs import PairMap
 from oanda.settings import ENVIRONMENT, config_from
 
-from rigs import ACCOUNT, EUR, CustodyRig, TradeRig, instrument_of, want
+from rigs import ACCOUNT, EUR, CustodyRig, TradeRig, delivered, instrument_of, want
 
 READER_ACCOUNT = "ACC-1"
 
@@ -166,10 +166,16 @@ def test_connections_carry_the_demo_badge_and_say_an_old_environment_value() -> 
     client, rig, _ = held()
     (connection,) = client.call_tool("read_connections", level="admin").data["connections"]
     assert connection["badge"] == "Demo" and connection["reached_environment"] == "paper"
-    # A value saved before 0.5.0: the guard reads it live until saved again.
-    rig.connections.configure(config_from({"sample_data": True, ENVIRONMENT: "practice"}))
+    # A value saved before 0.5.0, refused by the SDK and delivered unset: the
+    # guard counts the connection live until it is saved again.
+    (now,) = delivered({"sample_data": "true", ENVIRONMENT: "practice"})
+    rig.connections.configure(config_from(now.values, now.refused))
     read = client.call_tool("read_connections", level="admin")
     assert read.data["environment_to_save"] == "practice"
     (connection,) = read.data["connections"]
     assert connection["badge"] == "Live (environment not confirmed)"
-    assert "saved before this version" in client.get("/admin/connections", "admin").body
+    shown = client.get("/admin/connections", "admin").body
+    assert "no longer offered: save it again" in shown
+    data = client.call_tool("read_connection", level="admin").data
+    assert data["environment"] == "Not set: save it again"
+    assert data["badge"] == "Live (environment not confirmed)"

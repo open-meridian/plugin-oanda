@@ -49,8 +49,9 @@ next poll; Connections says what OANDA last answered.
 The badge is Demo only while the Environment setting says Practice and the
 session reached OANDA's practice host. "Live (environment not confirmed)"
 means the two disagree: check the Environment matches the token's account,
-or save the Environment again if Connections says it was saved before
-0.5.0. Until then agents may not place orders on it.
+or save the Environment again if Connections says it was saved as a value
+this version no longer offers (`practice`, from before 0.5.0). Until then
+agents may not place orders on it.
 
 ## A want declined
 

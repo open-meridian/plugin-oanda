@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import meridian
+
 from oanda.settings import (
     ACCOUNT_ID,
     DECLARED,
@@ -13,6 +15,8 @@ from oanda.settings import (
     TOKEN,
     config_from,
 )
+
+from rigs import delivered
 
 
 def test_the_approved_names_and_the_token_secret() -> None:
@@ -34,11 +38,32 @@ def test_the_environment_is_the_role_common_setting_practice_is_paper() -> None:
     assert config.credentials is not None and config.credentials.environment == PRACTICE
 
 
-def test_a_value_saved_before_0_5_0_still_reaches_practice() -> None:
-    """`practice`, saved before the setting was the role-common one: the
-    practice host still, and kept as saved for the guard's badge."""
-    config = config_from({ENVIRONMENT: "practice"})
-    assert config.environment == PRACTICE and config.environment_setting == "practice"
+def test_a_value_saved_before_0_5_0_is_refused_not_a_crash() -> None:
+    """`practice`, saved before the setting was the role-common one, is no
+    longer one of its choices. Through the SDK's real settings stream (0.31.1)
+    it is delivered unset and said refused, never raised (0.5.0 on SDK 0.31.0
+    stopped here): the plugin reaches OANDA's practice host, never the live
+    one, the agents' guard counts the connection live -- its badge "Live
+    (environment not confirmed)" -- and Connections asks for it again."""
+    (now,) = delivered({ENVIRONMENT: "practice", SYNTHETIC: "true"})
+    assert ENVIRONMENT not in now.values and ENVIRONMENT in now.missing_required
+    assert [(r.name, r.value) for r in now.refused] == [(ENVIRONMENT, "practice")]
+    config = config_from(now.values, now.refused)
+    assert config.environment == PRACTICE and config.environment_setting == ""
+    assert config.environment_refused == "practice"
+    assert meridian.connection_badge(config.environment_setting, "paper") == (
+        "Live (environment not confirmed)"
+    )
+
+
+def test_a_value_saved_again_as_practice_is_demo() -> None:
+    first, again = delivered(
+        {ENVIRONMENT: "practice", SYNTHETIC: "true"}, {ENVIRONMENT: PAPER, SYNTHETIC: "true"}
+    )
+    assert first.refused and not again.refused
+    config = config_from(again.values, again.refused)
+    assert config.environment_setting == PAPER and config.environment_refused == ""
+    assert meridian.connection_badge(config.environment_setting, "paper") == "Demo"
 
 
 def test_credentials_are_whole_or_named_missing() -> None:

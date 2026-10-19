@@ -20,7 +20,7 @@ for an Open Meridian deployment. The plugin holds three roles:
   OANDA's daily candle, on its day ending at 17:00 New York (ruled
   2026-10-13: "later, in the same repository").
 
-Version 0.5.0 (not released) is built on open-meridian 0.31.0, contract v26:
+Version 0.5.1 (not released) is built on open-meridian 0.31.1, contract v26:
 the `data` role, and the environment its session reached on its venue
 catalogue, the second key of the agents' demo-only guard. Its whole
 declaration -- its settings, pages and tools, the accounts it names by
@@ -37,7 +37,7 @@ by the deployment admin.
 
 | Setting | What it is |
 |---|---|
-| `environment` | The role-common setting (contract v26): `paper`, labelled Practice, OANDA's practice host, or `live`. Practice until a person chooses Live. A value saved before 0.5.0, `practice`, still reaches the practice host, but the agents' guard reads it as live until it is saved again; Connections says so. |
+| `environment` | The role-common setting (contract v26): `paper`, labelled Practice, OANDA's practice host, or `live`. Practice until a person chooses Live. A value saved before 0.5.0, `practice`, is refused by the SDK (0.31.1) and delivered unset: the plugin then reaches the practice host, never the live one, the agents' guard counts the connection live, and Connections asks for it to be saved again. |
 | `token` | Secret. The personal access token made in OANDA's hub. It is never shown, logged or kept. OANDA does not keep it either: if it is lost, revoke it and make a new one. |
 | `account_id` | Optional. Leave it empty and choose the account on Connections, from the v20 accounts the token reaches. Given, for example `101-001-1234567-001`, it is the account, as before 0.3.0, and Connections offers no choice. |
 | `poll_seconds` | How often the account is read (custody). |
