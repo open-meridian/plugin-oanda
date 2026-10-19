@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0
+## 0.4.0 (2026-10-19)
 
 On SDK 0.29.0 and contract v25 (sdk-contract/plugins-are-shared-and-
 documented-contract), the v25 build's step 8; on top of 0.3.0, which merges
