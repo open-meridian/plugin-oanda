@@ -26,6 +26,9 @@ practice account.
 - OANDA's answers are kept, the token removed, in storage for as long as
   each kind's window says, then archived, kept or deleted as an admin
   chooses on Settings.
+- OANDA's prices recorded in the lake are kept as the datasets' licences
+  say. Their defaults are not a statement of what OANDA's terms allow: the
+  deployment admin settles those on Data sources.
 
 ## Licence
 

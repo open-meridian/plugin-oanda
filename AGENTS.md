@@ -2,8 +2,9 @@
 
 A Meridian plugin, in Python on the open-meridian SDK, for spot FX through
 OANDA's v20 API: it places the placements naming it at OANDA and reports
-what OANDA did with them (`connectivity`, contract v23, W11), and reads the
-account its settings name as the custodian's view (`custody`, W2). It runs
+what OANDA did with them (`connectivity`, contract v23, W11), reads the
+account its settings name as the custodian's view (`custody`, W2), and from
+0.5.0 records OANDA's prices in the lake (`data`, W10). It runs
 beside a sidecar in a Meridian deployment and reaches nothing else but that
 sidecar and OANDA: what it may publish and subscribe to comes from the roles
 `pyproject.toml` declares under `[tool.meridian]`, once a deployment admin
@@ -22,9 +23,14 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   (`settings.py`: `environment` first, `practice` or `live`, then `token`,
   secret, and `account_id`, the names approved 2026-10-13; `account_id`
   optional from 0.3.0) and the pages (`page.py`), and runs the custody reads
-  (`custody.py`) and the trading work (`trading.py`). `venue.py` is OANDA's
-  v20 REST and stream behind a small interface, the one module speaking HTTP
-  to OANDA, standard library only; `synthetic.py` stands in for it.
+  (`custody.py`), the trading work (`trading.py`) and the data role's
+  (`lake.py`, on the SDK's `meridian.roles.data`: wants, standing wants,
+  recording and licences, its pages the SDK's for a venue listing pairs).
+  `venue.py` is OANDA's v20 REST and streams behind a small interface, the
+  one module speaking HTTP to OANDA, standard library only, and says which
+  environment its session reached (`paper` for the practice host, `live`
+  for the live one, `meridian.reached_environment`); `synthetic.py` stands
+  in for it, and reports `paper`.
   `connection.py` is the connection -- the environment and the account, the
   one an admin chose on Connections from those the token reaches
   (`choose_account`, approved 2026-10-14), or the one `account_id` names --
@@ -76,8 +82,19 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   statement and its activity as OANDA states them, each closed value with its
   provenance; activity is each transaction that moved cash, the backfill on
   the first read in the process going back to the account's opening.
-- **The suites.** `tests/test_connectivity_suite.py` and
-  `tests/test_custody_suite.py` map every case to OANDA's own terms, mark
+- **The environment** is the role-common setting (`meridian.environment`,
+  `paper` labelled Practice, or `live`); the agents' demo-only guard counts a
+  connection demo only while it and the session's report both say `paper`
+  (contract v26, G1). The report rides on the venue catalogue
+  (`VenueCatalogue.environment`); never write `paper` for a host that is not
+  OANDA's practice host.
+- **Prices** (`lake.py`): a quote and its mid for `live`, a mid close for
+  `daily`, the base currency's record as the subject and the quote currency
+  as the price's, never inverted or crossed; OANDA keeps no quote history,
+  so a restart's gap in `live` is not read back.
+- **The suites.** `tests/test_connectivity_suite.py`,
+  `tests/test_custody_suite.py` and `tests/test_lake.py` (the data suite)
+  map every case to OANDA's own terms, mark
   those the suite lets be not presented with why, and assert the report
   passes: no skip, no expected failure (meridian 0.1.43 refuses either).
   Never game a case.

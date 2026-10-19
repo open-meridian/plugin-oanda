@@ -1,4 +1,5 @@
 {#- Connections, at admin: the custody role's page with OANDA's connection,
+    its environment's badge (Demo or Live, contract v26's agents' guard),
     its trading, and "Enable trading" for an admin of connectivity (a new
     connection is read-only); then the Account section: the v20 accounts the
     token reaches, a v1 account unusable with why, and for an admin of each
@@ -12,11 +13,12 @@
 {% if notice %}{{ kit.notice(notice) }}{% endif %}
 {% if waiting %}<div class="notice warn" role="status">Waiting for its settings: {{ waiting|join(", ") }}.</div>
 {%- elif not data.account_id and data.listed %}<div class="notice warn" role="status">Waiting for the account: choose it under Account below. Nothing is read or traded until an admin does.</div>{% endif %}
+{% if data.environment_to_save %}<div class="notice warn" role="status">The Environment setting holds "{{ data.environment_to_save }}", saved before this version: the agents' guard reads it as live. Save it again in Settings, as Practice or Live.</div>{% endif %}
 {% if data.mode %}<p class="hint">Reaching: {{ data.mode }}.</p>{% endif %}
 {% endblock %}
 {% block vendor_columns %}
-{% if row is none %}<th>Trading</th><th class="wide-only">Placements</th><th></th>
-{%- else %}<td>{% if row.trading %}{{ kit.badge("Enabled", "good") }}{% else %}{{ kit.badge("Read-only", "warn") }}{% if row.trading_turned_off %} <span class="hint" title="{{ row.trading_turned_off }}">Turned off on a switch</span>{% endif %}{% endif %}</td><td class="wide-only">{{ row.working }} working, {{ row.held }} held, {{ row.unknown }} asked about, {{ row.waiting_for_a_value_date }} waiting for a value date</td>
+{% if row is none %}<th>Trading</th><th class="wide-only">Placements</th><th style="width: 9rem"><span class="visually-hidden">Act</span></th>
+{%- else %}<td>{% if row.badge == "Demo" %}{{ kit.badge("Demo", "good") }}{% elif row.badge == "Live" %}{{ kit.badge("Live", "warn") }}{% else %}{{ kit.badge(row.badge or "Live", "bad") }}{% endif %} {% if row.trading %}{{ kit.badge("Enabled", "good") }}{% else %}{{ kit.badge("Read-only", "warn") }}{% if row.trading_turned_off %} <span class="hint" title="{{ row.trading_turned_off }}">Turned off on a switch</span>{% endif %}{% endif %}</td><td class="wide-only">{{ row.working }} working, {{ row.held }} held, {{ row.unknown }} asked about, {{ row.waiting_for_a_value_date }} waiting for a value date</td>
 <td>{%- if not row.trading and caller.level_for("connectivity") == admin_level -%}
 {%- if "enable_trading" in caller.second_pair_of_eyes %}{{ kit.action(paths.enable_trading, "Prepare", fields={"connection_id": row.connection_id, "prepare": "1"}, label="Prepare: enable trading on " ~ row.connection) }}
 {%- else %}{{ kit.action(paths.enable_trading, "Enable trading", fields={"connection_id": row.connection_id}, label="Enable trading on " ~ row.connection) }}{% endif -%}

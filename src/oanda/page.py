@@ -1,7 +1,16 @@
-"""The plugin's pages, on the SDK's `meridian.Pages`: the custody role's
-common pages (spec/plugin-pages-follow-their-role), each template extending
-the SDK's `meridian/roles/custody/<page>.html` and adding OANDA's own only
-in its blocks.
+"""The plugin's pages, on the SDK's `meridian.Pages`: the data and custody
+roles' common pages (spec/plugin-pages-follow-their-role), each template
+extending the SDK's `meridian/roles/<role>/<page>.html` and adding OANDA's
+own only in its blocks.
+
+- **Connection** (`/`, `read_connection`) and **Datasets** (`/datasets`,
+  `read_datasets`), at `admin`, for an admin of the data role (from 0.5.0):
+  the data role's, the SDK's records and templates for a venue listing pairs
+  (`meridian.roles.data.pairs`). Connection: the mode, the token set or not
+  (never its value), the environment and the agents' guard's badge, OANDA's
+  limits and the calls made, the venue, and the pricing stream; Datasets:
+  `live` and `daily` as declared, licensed or not, each want, and OANDA's
+  pairs. Neither shows a price: prices are the reading roles'.
 
 - **Connections** (`/admin/connections`, `read_connections`) and **Account
   links** (`/admin/accounts`, `read_account_links`; `link_account`), at
@@ -17,7 +26,8 @@ in its blocks.
   `/admin/connections/choose-account`): the only usable one is preselected,
   never chosen until confirmed, and none is offered while the Account ID
   setting names the account (connection.py).
-- **Statements** (`/`, `read_statements`) and **Raw records** (`/raw`), at
+- **Statements** (`/statements`, `read_statements`; `/` before 0.5.0, now the
+  data role's Connection) and **Raw records** (`/raw`), at
   `write` and `read`: the account's statement, its rows by currency with
   what is pending on each value date, for a person who may read the
   deployment's account it is linked to; and OANDA's raw records kept for
@@ -40,26 +50,32 @@ from urllib.parse import parse_qs, urlencode
 
 import meridian
 from meridian.roles import custody as custody_role
+from meridian.roles import data as data_role
+from meridian.roles.data import pairs as role_pairs
 
 from . import records
 from .connection import Connections, Listing
 from .custody import Row, Syncer, account_kind
-from .declared import KINDS
+from .declared import CATALOGUE, KINDS, VENUE_NAME
+from .lake import ENTITLED, Lake, connection_read
 from .linking import Links, refusal, refused
 from .raw import dumps
-from .settings import TOKEN, label
+from .settings import LIVE, PAPER, TOKEN, label
 from .trading import Trader
 
 TITLE = "OANDA"
 CUSTODY = "custody"
 CONNECTIVITY = "connectivity"
+DATA = "data"
 KIT = "0.12.0"
 
 _MOST_BODY = 8192
 
 pages = meridian.Pages(TITLE, templates=Path(__file__).parent / "templates", kit=KIT)
 
-STATEMENTS = "/"
+CONNECTION = "/"
+DATASETS = "/datasets"
+STATEMENTS = "/statements"
 RAW = "/raw"
 CONNECTIONS = "/admin/connections"
 ACCOUNTS = "/admin/accounts"
@@ -75,6 +91,7 @@ pages.environment.globals["paths"] = {
     "choose_account": CHOOSE_ACCOUNT,
     "link": LINK,
     "raw": RAW,
+    "statements": STATEMENTS,
 }
 pages.environment.globals["admin_level"] = meridian.AccessLevel.ACCESS_LEVEL_ADMIN
 
@@ -95,6 +112,7 @@ class Held:
     links: Links
     wake: asyncio.Event
     trader: Trader | None = None
+    lake: Lake | None = None
 
 
 _held: Held | None = None
@@ -145,6 +163,110 @@ def _not_done(failed: meridian.MeridianError) -> str:
     return f"That was not done: {refusal(failed)}"
 
 
+# ── The environment: the agents' guard's two keys ───────────────────────────
+
+
+def _reached() -> str:
+    """The environment the session reaches, read from OANDA's host (venue.py):
+    `paper`, `live`, or empty before there is anything to reach."""
+    venue = _now().connections.venue()
+    return venue.environment if venue is not None else ""
+
+
+def _environment_shown(setting: str) -> str:
+    """The Environment setting as its form labels it."""
+    return {PAPER: "Practice", LIVE: "Live"}.get(setting, f"{setting} (save it again)")
+
+
+def _badge() -> str:
+    """The badge both keys make (contract v26, W11.8): "Demo" where the
+    setting says Practice and the session reached OANDA's practice host."""
+    return meridian.connection_badge(_now().connections.config.environment_setting, _reached())
+
+
+def _legacy_setting() -> str:
+    """The Environment setting's value where it is one saved before 0.5.0,
+    which the agents' guard reads as live; empty otherwise."""
+    setting = _now().connections.config.environment_setting
+    return "" if setting in (PAPER, LIVE) else setting
+
+
+# ── The data role's Connection and Datasets, at admin ──────────────────────
+
+
+def _data_mode() -> str:
+    config = _now().connections.config
+    if config.synthetic:
+        return "Sample data"
+    if config.credentials is None:
+        return "No key"
+    return "Live" if config.environment == LIVE else "Practice"
+
+
+def _connection_read() -> records.LakeConnectionRead:
+    held = _now()
+    config = held.connections.config
+    credentials = [data_role.Credential(label(TOKEN), set=config.credentials is not None)]
+    read: records.LakeConnectionRead = connection_read(
+        held.lake,
+        credentials,
+        _data_mode(),
+        environment=_environment_shown(config.environment_setting),
+        reached_environment=_reached(),
+        badge=_badge(),
+    )
+    return read
+
+
+@pages.page(
+    CONNECTION,
+    "Connection",
+    levels="admin",
+    roles=DATA,
+    answers=records.LakeConnectionRead,
+    name="read_connection",
+    description=(
+        "The data role's connection to OANDA's pricing: the mode (Practice, Live, Sample "
+        "data or No key), whether the access token is set (never its value), the environment "
+        "and the agents' guard's badge (Demo only while the setting says Practice and the "
+        "session reached OANDA's practice host), OANDA's limits and the calls made, OANDA as "
+        "the venue master holds it, and the pricing stream: its state, the pairs on it, its "
+        "reconnects and messages. No price."
+    ),
+)
+async def connection(request: meridian.Request) -> meridian.Response:
+    return pages.answer("connection.html", _connection_read())
+
+
+def _datasets_read() -> role_pairs.DatasetsRead:
+    lake = _now().lake
+    if lake is None:
+        return role_pairs.datasets_read(None, CATALOGUE, TITLE.lower(), ENTITLED)
+    return lake.datasets_read()
+
+
+@pages.page(
+    DATASETS,
+    "Datasets",
+    levels="admin",
+    roles=DATA,
+    answers=role_pairs.DatasetsRead,
+    name="read_datasets",
+    description=(
+        "The datasets this plugin serves the lake, as its catalogue declares them -- live, "
+        "each pair's quote and mid from OANDA's pricing, and daily, each pair's close on "
+        "OANDA's day ending at 17:00 New York -- licensed or not, what each recorded and "
+        "declined since the plugin started, each want heard, the standing ones kept current "
+        "first, and OANDA's pairs: how many it lists and how many serve, and the currencies "
+        "not resolved. No price."
+    ),
+)
+async def datasets(request: meridian.Request) -> meridian.Response:
+    return pages.answer(
+        "meridian/roles/data/pairs/datasets.html", _datasets_read(), venue=VENUE_NAME
+    )
+
+
 # ── Connections, at admin ───────────────────────────────────────────────────
 
 
@@ -175,6 +297,8 @@ def _connections_read() -> records.ConnectionsRead:
                 else "",
                 connection_id=connection.connection_id,
                 environment=connection.environment,
+                reached_environment=connection.venue.environment,
+                badge=_badge(),
                 trading=connection.trading,
                 trading_enabled_by=by,
                 trading_turned_off=""
@@ -190,6 +314,7 @@ def _connections_read() -> records.ConnectionsRead:
         credentials=credentials,
         connections=rows,
         mode="sample data: the synthetic OANDA" if config.synthetic else config.environment,
+        environment_to_save=_legacy_setting(),
         reached=[
             records.ReachedRead(a.account_id, a.usable, a.reason) for a in listing.accounts
         ],
@@ -909,6 +1034,12 @@ async def raw_records(request: meridian.Request) -> meridian.Response:
         # Only a record of the account the person may read is shown.
         if hit is not None and hit.account == connection.account_id:
             found = {"key": hit.key, "text": dumps(hit.document, indent=2)}
+    if key.startswith("prices/") and held.lake is not None:
+        # The data role's: what OANDA's pricing answered, behind a price or a
+        # quote in the lake. Market data, no account's.
+        priced = held.lake.raw.get(key)
+        if priced is not None:
+            found = {"key": key, "text": dumps(priced, indent=2)}
     plugin = request.plugin
     return meridian.Response(
         pages.render(

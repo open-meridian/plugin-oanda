@@ -43,3 +43,24 @@ Your execution plugin's desk accepts it to an order or answers it DK.
 
 OANDA has not answered for longer than Stale after. It is read again on the
 next poll; Connections says what OANDA last answered.
+
+## A connection shows Live, or "environment not confirmed"
+
+The badge is Demo only while the Environment setting says Practice and the
+session reached OANDA's practice host. "Live (environment not confirmed)"
+means the two disagree: check the Environment matches the token's account,
+or save the Environment again if Connections says it was saved before
+0.5.0. Until then agents may not place orders on it.
+
+## A want declined
+
+On Datasets, a subject is declined "not covered" where no currency pair
+OANDA quotes has it as the base: OANDA quotes USD_JPY, so the yen's own
+record is not covered, and nothing is inverted. "Beyond history" answers a
+past range of the live dataset, since OANDA keeps no history of its quotes.
+"Source silent" means OANDA said nothing, or no account is chosen yet.
+
+## The stream is waiting
+
+The pricing stream dropped and opens again, waiting longer each time, a
+minute at most. Connection shows its last error.

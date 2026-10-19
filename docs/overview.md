@@ -2,15 +2,34 @@
 
 The OANDA plugin connects an Open Meridian deployment to an OANDA spot FX
 account through OANDA's v20 API: it places the desk's FX orders at OANDA,
-reports what OANDA did with each, and brings in the account as the
-custodian's view.
+reports what OANDA did with each, brings in the account as the custodian's
+view, and records OANDA's prices in your deployment's lake.
 
-It is a custody plugin and a connectivity plugin: the first-use path, the
-common pages and the Summary figures of each are described once on
+It holds three roles, `data`, `custody` and `connectivity`: the first-use
+path, the common pages and the Summary figures of the first two are
+described once, on
+[Using a data plugin](https://open-meridian.dev/how-to/using-a-data-plugin/)
+and
 [Using a custody plugin](https://open-meridian.dev/how-to/using-a-custody-plugin/).
 These sections cover what is OANDA's own.
 
-## Its two roles
+## Its three roles
+
+**Data**: it records OANDA's prices in the lake, for the plugins your
+deployment entitles to read them. Two datasets:
+
+- **live**: each currency pair's best bid and ask, with the liquidity OANDA
+  states beside each, as a quote, and their mid as a price. A pair kept
+  current is recorded from OANDA's pricing stream, at most once a second.
+  A price OANDA says is not tradeable (outside FX hours) is marked halted.
+  Its default terms keep the rows for 90 days.
+- **daily**: each pair's close, the mid of OANDA's daily candle, on OANDA's
+  day ending at 17:00 New York. The day still forming is restated as it
+  fills.
+
+A pair is a price of its base currency in its quote currency, exactly as
+OANDA quotes it: EUR_USD is the euro's price in dollars. Nothing is inverted
+or crossed. Only currency pairs are recorded, not metals or CFDs.
 
 **Connectivity**: it places the orders your execution plugin (an `ems`)
 sends it at OANDA, and reports acknowledgements, rejections, fills,
@@ -21,6 +40,17 @@ execution plugin to accept to an order or answer DK.
 
 **Custody**: it reads the chosen account as the custodian's view: the
 account, its sync status, a statement each read, and its activity.
+
+All three reach the same account with the same token.
+
+## Practice and live
+
+The **Environment** setting is Practice or Live: which of OANDA's hosts the
+account is on. The plugin also reports which host its session actually
+reached, on its catalogue: OANDA's practice host or its live one. A
+connection is **Demo** only while both say practice. Your deployment lets
+agents place orders only on a Demo connection; anything else, including a
+mismatch, counts as Live.
 
 ## How a position is shown
 
@@ -45,8 +75,9 @@ fill states none, and a fill is never sent with a guessed date.
 
 ## What it does not do
 
-- It records no market data: OANDA's quotes in the lake are a later
-  version's.
+- It cannot read back a gap in its quotes: OANDA keeps no history of its
+  quotes. After a restart the stream starts again from each pair's price
+  now.
 - It never turns a pair round: an order in US dollars priced in euros is
   rejected, naming EUR_USD.
 - It never sends an order twice: an unanswered send is resolved by asking

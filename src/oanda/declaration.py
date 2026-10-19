@@ -9,7 +9,8 @@ with, or its sidecar refuses it naming the first difference, so beside the
 parts it declared before (declared.py, whose docstring says what each is)
 it carries its interface -- its pages, with the levels each serves, and the
 tools their typed routes make -- on a port fixed here, never read from the
-environment, and the vendor's documentation, the Markdown in `docs/`
+environment, from 0.5.0 its catalogue (declared.py), and the vendor's
+documentation, the Markdown in `docs/`
 (`/plugin/docs` in its image), which a deployment admin reads on its
 Documentation tab before launching it.
 """
@@ -19,7 +20,7 @@ from __future__ import annotations
 import meridian
 from meridian.declaration import Declaration, Storage
 
-from .declared import KINDS, NOT_CARRIED
+from .declared import CATALOGUE, KINDS, NOT_CARRIED
 from .page import TITLE, pages
 from .settings import DECLARED, MOST_RETENTION_DAYS
 
@@ -32,5 +33,6 @@ DECLARATION = Declaration(
     storage=Storage(retention_days=MOST_RETENTION_DAYS, kinds=KINDS),
     interface=meridian.Interface(port=PORT, title=TITLE, pages=pages),
     reads_external_accounts=True,
+    catalogue=CATALOGUE,
     documentation="docs",
 )

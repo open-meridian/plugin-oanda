@@ -34,9 +34,9 @@ CLI_CONTEXT := $(if $(MERIDIAN_BIN),--build-context cli=$(MERIDIAN_BIN),)
 # Moved together by a deliberate commit. `make e2e RUNTIME_IMAGE=...:latest
 # HARNESS_IMAGE=...:latest` tries a newer core; e2e-latest.yaml does that
 # weekly.
-# Core abf028f (merged as fc3f0d1), contract v25, as published with chart 0.1.306.
-RUNTIME_IMAGE ?= ghcr.io/open-meridian/meridian-runtime:abf028f@sha256:67c765c3c8234d942fa18b95a2d18cbc96358853ed27a730a2f057a15625d3c9
-HARNESS_IMAGE ?= ghcr.io/open-meridian/meridian-harness:abf028f@sha256:bdc4325691084e2cbc5e4ba4c01bb9e3ea45be5264fb081682b1c48f1864b1e8
+# Core 17a13a2 (merged as 648e25f), contract v26, as published with chart 0.1.308.
+RUNTIME_IMAGE ?= ghcr.io/open-meridian/meridian-runtime:17a13a2@sha256:09a7daf0b48ed40a047749479513079ee23a9624aa4416f2baacf0460f7b47ac
+HARNESS_IMAGE ?= ghcr.io/open-meridian/meridian-harness:17a13a2@sha256:a4b2ed2ed7d26947d1af5c3a00749f5227811b81eddbd48f0c010443fa057d6b
 # Its roles as pyproject.toml declares them, so the harness launches it as
 # `meridian plugin upload` would.
 ROLES := $(shell sed -n 's/^roles *= *\[\(.*\)\]/\1/p' pyproject.toml | tr -d ' ')

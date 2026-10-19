@@ -1,0 +1,16 @@
+{#- The data role's Connection (records.LakeConnectionRead), at admin: the
+    SDK's for a venue listing pairs (meridian/roles/data/pairs/connection.html:
+    the mode, the token set or not, OANDA's limits and calls, the venue under
+    "Key", the pricing stream under "Stream"), and OANDA's nuance at its
+    blocks only: under "Key", the environment and the agents' guard's badge,
+    Demo only while the setting says Practice and the session reached
+    OANDA's practice host. No price. -#}
+{% extends "meridian/roles/data/pairs/connection.html" %}
+{% block vendor_rows %}
+{{ super() }}
+{% import "meridian/roles/_rows.html" as om %}
+{% if section == "Key" %}
+{{ om.row("Environment", data.environment or "Not set", "The session reached " ~ (data.reached_environment or "neither of OANDA's hosts") ~ ".") }}
+{{ om.row("Agents' orders", data.badge or "Live", "Agents may place orders only on a Demo connection.") }}
+{% endif %}
+{% endblock %}

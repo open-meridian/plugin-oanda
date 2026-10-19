@@ -644,6 +644,22 @@ def test_the_catalogue_says_oanda_takes_no_execution_acknowledgement() -> None:
     assert catalogue.catalogue.execution_acknowledgement == ops.EXECUTION_ACKNOWLEDGEMENT_NONE
 
 
+def test_the_catalogue_carries_the_environment_the_session_reached() -> None:
+    """Contract v26, G1 question 5: the agents' guard's second key. The
+    synthetic OANDA reaches no venue and reports `paper`; OANDA's practice
+    host is `paper` and its live host `live` (test_venue.py)."""
+    recorder = Recorder("oanda")
+
+    async def work() -> None:
+        rig = TradeRig(recorder)
+        await rig.trader.start()
+        await rig.trader.publish()  # unchanged: published once
+
+    run(work())
+    (catalogue,) = recorder.on("ReportVenueCatalogue")
+    assert catalogue.catalogue.environment == "paper"
+
+
 def test_good_till_date_ends_at_oandas_day_end() -> None:
     async def work() -> None:
         rig = TradeRig(Recorder("oanda"))

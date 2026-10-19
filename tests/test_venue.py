@@ -101,3 +101,31 @@ def test_a_call_never_answered_has_no_status() -> None:
 def test_an_unknown_environment_is_refused() -> None:
     with pytest.raises(ValueError):
         Oanda(TOKEN, "staging", Opener())
+
+
+def test_the_environment_the_session_reaches_is_read_from_oandas_host() -> None:
+    """Contract v26, G1 question 5: api-fxpractice is `paper`, api-fxtrade
+    `live`; the setting's two hosts and nothing else."""
+    assert Oanda(TOKEN, "practice", Opener()).environment == "paper"
+    assert Oanda(TOKEN, "live", Opener()).environment == "live"
+
+
+def test_prices_candles_and_the_pricing_stream_are_asked_of_the_account() -> None:
+    opener = Opener()
+    venue = Oanda(TOKEN, "practice", opener)
+    asyncio.run(venue.pricing("101-001-1-001", ["EUR_USD", "USD_JPY"]))
+    asyncio.run(
+        venue.candles(
+            "101-001-1-001", "EUR_USD", "2026-10-12T21:00:00Z", "2026-10-13T21:00:00Z"
+        )
+    )
+    asked = [request.full_url for request in opener.asked]
+    assert asked[0] == (
+        "https://api-fxpractice.oanda.com/v3/accounts/101-001-1-001/pricing"
+        "?instruments=EUR_USD%2CUSD_JPY"
+    )
+    assert asked[1].startswith(
+        "https://api-fxpractice.oanda.com/v3/accounts/101-001-1-001/instruments/EUR_USD/candles"
+        "?price=M&granularity=D&from=2026-10-12T21%3A00%3A00Z"
+    )
+    assert all(TOKEN not in url for url in asked)

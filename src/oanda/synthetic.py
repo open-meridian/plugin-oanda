@@ -57,6 +57,17 @@ plugin: no client extensions, filled at once. The e2e asks for one, or for a
 roll, through `ask()`: a request file in the account's state directory, taken
 on the synthetic account's next step, so nothing writes its state but itself.
 
+**Its prices** (from 0.5.0, the data role). Each currency pair's price
+moves a pip a second about its synthetic price above, the same at the same
+second every time, its bid and ask a pip either side, each with a
+liquidity of 1,000,000: `pricing()` answers them now, `pricing_stream()`
+from now on, and `candles()` each trading day's mid candle, ending at 17:00
+New York, the day forming `complete` false. A price is tradeable from 17:00
+New York on Sunday to 17:00 on Friday, as OANDA's FX is; outside it, OANDA's
+last price is answered with `tradeable` false. It reports the environment
+`paper`: nothing it does reaches a venue, so the agents' guard may count it
+demo, where the setting says Practice too.
+
 **A controlled clock** (decision 66, 2026-10-16). Through `ask()` the e2e may
 set the synthetic account's clock (`{"clock": "<RFC 3339 time>"}`): from
 then on the account's own times -- each transaction's, each fill's, each
@@ -72,7 +83,7 @@ import asyncio
 import json
 import os
 import tempfile
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
@@ -132,6 +143,15 @@ DOLLARS = {
     "XAU": Decimal("2401.150"),
 }
 
+#: Each side's liquidity, as OANDA states it beside a price.
+LIQUIDITY = 1_000_000
+#: How many pips the synthetic price moves either way, a pip a second.
+SWING = 4
+#: How often the synthetic pricing stream says something, and how many
+#: quiet seconds before its heartbeat.
+STREAM_EVERY_SECONDS = 1.0
+HEARTBEAT_SECONDS = 5
+
 #: The daily financing rate the roll charges a long (and pays a short) on its
 #: dollar value: a synthetic figure, not OANDA's.
 FINANCING_RATE = Decimal("0.00002")
@@ -177,8 +197,32 @@ class _Clock:
         return moments.rfc3339(self.ns())
 
 
+def _pip(instrument: str) -> Decimal:
+    return Decimal(1).scaleb(INSTRUMENTS[instrument][1])
+
+
+def _mid_at(instrument: str, at_ns: int) -> Decimal:
+    """The synthetic mid at a moment: its price, a pip a second about it."""
+    second = at_ns // 1_000_000_000
+    step = second % (2 * SWING + 1) - SWING
+    return INSTRUMENTS[instrument][3] + step * _pip(instrument)
+
+
+def _tradeable(at_ns: int) -> bool:
+    """Whether FX trades at a moment: from 17:00 New York on Sunday to 17:00
+    on Friday."""
+    local = moments.moment(at_ns).astimezone(moments.NEW_YORK)
+    day, hour = local.weekday(), local.hour
+    if day == 4 and hour >= moments.DAY_ENDS:
+        return False
+    return not (day == 5 or (day == 6 and hour < moments.DAY_ENDS))
+
+
 class SyntheticOanda(Venue):
     """The simulated account (above). `state` is where it is kept, or None."""
+
+    #: Nothing it does reaches a venue (above).
+    environment = "paper"
 
     def __init__(self, now: Callable[[], datetime], state: Path | None = None) -> None:
         self._clock = _Clock(now)
@@ -934,6 +978,105 @@ class SyntheticOanda(Venue):
                     "time": self._clock.text(),
                 }
             await asyncio.sleep(0.2)
+
+    # ── Prices ──────────────────────────────────────────────────────────
+
+    def price_at(self, instrument: str, at_ns: int) -> Json:
+        """One instrument's PRICE at a moment, as OANDA's pricing states it."""
+        mid, pip = _mid_at(instrument, at_ns), _pip(instrument)
+        return {
+            "type": "PRICE",
+            "instrument": instrument,
+            "time": moments.rfc3339(at_ns),
+            "tradeable": _tradeable(at_ns),
+            "bids": [{"price": _price_text(instrument, mid - pip), "liquidity": LIQUIDITY}],
+            "asks": [{"price": _price_text(instrument, mid + pip), "liquidity": LIQUIDITY}],
+            "closeoutBid": _price_text(instrument, mid - 2 * pip),
+            "closeoutAsk": _price_text(instrument, mid + 2 * pip),
+        }
+
+    def _priced(self, instruments: Sequence[str], asked: str) -> list[str]:
+        unknown = [i for i in instruments if i not in INSTRUMENTS]
+        if unknown or not instruments:
+            raise VenueError(
+                asked,
+                400,
+                {
+                    "errorCode": "INVALID_INSTRUMENTS",
+                    "errorMessage": f"Invalid value specified for 'instruments': {unknown}",
+                },
+            )
+        return list(instruments)
+
+    async def pricing(self, account_id: str, instruments: Sequence[str]) -> Json:
+        self._check(account_id, "reading prices")
+        at = self._clock.ns()
+        priced = self._priced(instruments, "reading prices")
+        return {"time": moments.rfc3339(at), "prices": [self.price_at(i, at) for i in priced]}
+
+    async def candles(
+        self, account_id: str, instrument: str, from_time: str, to_time: str
+    ) -> list[Json]:
+        """Each trading day's mid candle whose day ends after `from_time` and
+        starts before `to_time`; no Saturday's or Sunday's."""
+        self._check(account_id, "reading candles")
+        self._priced([instrument], "reading candles")
+        now = self._clock.ns()
+        first, last = moments.ns(from_time), min(moments.ns(to_time) or now, now)
+        found: list[Json] = []
+        day = moments.trading_day(first)
+        while True:
+            ends = moments.of(
+                datetime.combine(day, time(moments.DAY_ENDS), tzinfo=moments.NEW_YORK)
+            )
+            starts = moments.of(
+                datetime.combine(
+                    day - timedelta(days=1), time(moments.DAY_ENDS), tzinfo=moments.NEW_YORK
+                )
+            )
+            if starts >= last:
+                break
+            if day.weekday() < 5 and ends > first:
+                found.append(self._candle(instrument, day, starts, ends, now))
+            day += timedelta(days=1)
+        return found
+
+    def _candle(self, instrument: str, day: date, starts: int, ends: int, now: int) -> Json:
+        price, pip = INSTRUMENTS[instrument][3], _pip(instrument)
+        ordinal = day.toordinal()
+        opened = price + (ordinal % 5 - 2) * 10 * pip
+        complete = ends <= now
+        closed = opened + (ordinal % 3 - 1) * 5 * pip if complete else _mid_at(instrument, now)
+        high, low = max(opened, closed) + 3 * pip, min(opened, closed) - 3 * pip
+        return {
+            "complete": complete,
+            "volume": 1000 + ordinal % 100,
+            "time": moments.rfc3339(starts),
+            "mid": {
+                "o": _price_text(instrument, opened),
+                "h": _price_text(instrument, high),
+                "l": _price_text(instrument, low),
+                "c": _price_text(instrument, closed),
+            },
+        }
+
+    async def pricing_stream(
+        self, account_id: str, instruments: Sequence[str]
+    ) -> AsyncIterator[Json]:
+        """Each instrument's price now, then as it moves, a second apart, and
+        a heartbeat every five seconds."""
+        self._check(account_id, "streaming prices")
+        priced = self._priced(instruments, "streaming prices")
+        beat = 0
+        while True:
+            at = self._clock.ns()
+            for instrument in priced:
+                yield self.price_at(instrument, at)
+            beat += 1
+            if beat >= HEARTBEAT_SECONDS:
+                beat = 0
+                yield {"type": "HEARTBEAT", "time": moments.rfc3339(at)}
+            await asyncio.sleep(STREAM_EVERY_SECONDS)
 
     # ── For tests and the e2e ───────────────────────────────────────────
 

@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import tempfile
 from collections.abc import Awaitable, Callable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import meridian
+from meridian import edge
 from meridian.plugin.v1 import operations_pb2 as ops
 from meridian.suites import Recorder
 
@@ -22,6 +23,7 @@ from oanda import moments, synthetic
 from oanda.connection import Connection, Connections
 from oanda.custody import Syncer
 from oanda.kept import Kept
+from oanda.lake import Lake
 from oanda.pairs import PairMap
 from oanda.raw import RawStore
 from oanda.settings import Config
@@ -382,6 +384,71 @@ class CustodyRig:
         held = self.connections.synthetic_venue
         assert held is not None
         return held
+
+
+def instrument_of(params: ops.ResolveInstrumentParams) -> ops.ResolveInstrumentResult:
+    """A cash instrument's record, by the ID `cash_id` names it by, as the
+    deployment reads it (W3.6)."""
+    held = params.instrument_id
+    if held.startswith("INS-01J") and held.endswith("1") and len(held) == 30:
+        return ops.ResolveInstrumentResult(found=True, instrument=cash_record(held[7:10]))
+    return ops.ResolveInstrumentResult(found=False)
+
+
+class LakeRig:
+    """The data role's Lake over the recorder and the synthetic OANDA, its
+    v20 account chosen; currencies resolved and named as the deployment's
+    records answer them."""
+
+    def __init__(
+        self,
+        recorder: Recorder,
+        *,
+        storage: Path | None = None,
+        at: datetime = NOW,
+        resolve: Callable[[Any], ops.ResolveIdentifierResult] = resolved,
+    ) -> None:
+        self.recorder = recorder
+        self.clock = Clock(at)
+        self.storage = storage or Path(tempfile.mkdtemp())
+        self.connections = Connections(self.storage, self.clock)
+        self.connections.configure(Config(synthetic=True))
+        self.connections.take(list(synthetic.ACCOUNTS))
+        assert self.connections.choose(ACCOUNT, "Rig Admin") == ""
+        recorder.answer("ResolveIdentifier", resolve)
+        recorder.answer("ResolveInstrument", instrument_of)
+        self.lake = Lake(
+            recorder,
+            self.connections,
+            PairMap(None),
+            edge.RawStore(self.storage, kind="prices"),
+            clock_ns=lambda: moments.of(self.clock()),
+        )
+
+
+def want(
+    want_id: str,
+    key: str,
+    subjects: list[str],
+    *,
+    day: str = "",
+    data_type: str = "",
+    kinds: tuple[int, ...] = (),
+    standing: bool = False,
+    valid_from_ns: int = 0,
+    instance: str = INSTANCE,
+) -> ops.ObservationsWantedEvent:
+    """A want as the lake delivers it."""
+    return ops.ObservationsWantedEvent(
+        want_id=want_id,
+        dataset=f"{instance}:{key}",
+        data_type=data_type,
+        subjects=[ops.SubjectRef(entity_id=s) for s in subjects],
+        kinds=[ops.PriceKind.Name(k) for k in kinds],
+        business_date=day,
+        standing=standing,
+        valid_from_ns=valid_from_ns,
+    )
 
 
 def report_of(recorder: Recorder) -> list[Any]:

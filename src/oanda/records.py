@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from meridian.roles import custody
+from meridian.roles import custody, data
 
 #: The longest ID or name a form here takes.
 MOST_ID = 200
@@ -120,6 +120,12 @@ class ConnectionRead(custody.ConnectionRead):
 
     connection_id: str = ""
     environment: str = ""
+    # The agents' demo-only guard's two keys (contract v26, G1): the
+    # environment its session reached, read from OANDA's host (`paper`,
+    # `live`), and the badge both keys make, "Demo", "Live" or "Live
+    # (environment not confirmed)".
+    reached_environment: str = ""
+    badge: str = ""
     trading: bool = False
     trading_enabled_by: str = ""
     # Where trading on this connection was last turned off by a switch away
@@ -152,6 +158,10 @@ class ConnectionsRead(custody.ConnectionsRead):
 
     connections: list[ConnectionRead] = field(default_factory=list)  # type: ignore[assignment]
     mode: str = ""
+    # The Environment setting's value, where it is one saved before 0.5.0
+    # (`practice`), which the agents' guard reads as live until it is saved
+    # again; empty otherwise.
+    environment_to_save: str = ""
     reached: list[ReachedRead] = field(default_factory=list)
     listed: bool = False
     listing_error: str = ""
@@ -191,3 +201,25 @@ class StatementRead(custody.StatementRead):
 @dataclass(frozen=True)
 class StatementsRead(custody.StatementsRead):
     statements: list[StatementRead] = field(default_factory=list)  # type: ignore[assignment]
+
+
+@dataclass(frozen=True)
+class LakeConnectionRead(data.VenueConnection):
+    """The data role's Connection (`read_connection`): the role's common
+    fields and OANDA's as the venue (`VenueConnection`), the pricing stream's
+    session as `meridian.roles.data.pairs` names it -- "off" while nothing
+    stands on it, "connecting", "open", or "waiting" to open again after a
+    drop; the pairs on it, how often it opened and dropped, its messages --
+    and the environment: the setting's ("Practice" or "Live"), the one the
+    session reached (`paper`, `live`), and the badge both make."""
+
+    stream_state: str = "off"
+    streaming: int = 0
+    stream_opened: int = 0
+    stream_dropped: int = 0
+    stream_messages: int = 0
+    last_message_at: str = ""
+    stream_error: str = ""
+    environment: str = ""
+    reached_environment: str = ""
+    badge: str = ""

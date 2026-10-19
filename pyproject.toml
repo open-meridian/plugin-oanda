@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oanda"
-version = "0.4.0"
-description = "Spot FX through OANDA's v20 API for an Open Meridian deployment: orders placed and filled, and the account's positions, cash and activity"
+version = "0.5.0"
+description = "Spot FX through OANDA's v20 API for an Open Meridian deployment: orders placed and filled, the account's positions, cash and activity, and OANDA's prices in the lake"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 # The SDK and nothing else, pinned exactly: the sidecar this runs beside
 # speaks one version of the contract, and a range would let a rebuild pick up
 # another. The Dockerfile's base is the same version. OANDA's v20 API is
 # reached with the standard library alone (src/oanda/venue.py).
-dependencies = ["open-meridian==0.29.0"]
+dependencies = ["open-meridian==0.31.0"]
 
 [project.urls]
 Repository = "https://github.com/open-meridian/plugin-oanda"
@@ -42,15 +42,19 @@ oanda = ["templates/*.html"]
 # connectivity, custody, data, ems, oms, operations, portfolio, reporting,
 # servicing, settlement, signal -- and its grants are theirs (ruled
 # 2026-10-13, the spot-FX plugin's Q1: `connectivity` and `custody` in the
-# first build, `data` later). `connectivity` (contract v23, W11): it places
-# the placements naming it at OANDA and reports what OANDA did with them,
-# each roll's value-date move, and the fills of orders taken outside it.
-# `custody` (W2): the account's sync status, statements and activity.
-roles = ["custody", "connectivity"]
+# first build, `data` later, in the same repository). `connectivity`
+# (contract v23, W11): it places the placements naming it at OANDA and
+# reports what OANDA did with them, each roll's value-date move, and the
+# fills of orders taken outside it. `custody` (W2): the account's sync
+# status, statements and activity. `data` (from 0.5.0, W10): OANDA's prices
+# in the lake -- each pair's quote and mid, live and kept, and its daily
+# close.
+roles = ["custody", "connectivity", "data"]
 # Whether it serves a page through its sidecar.
 interface = true
 # Its declaration (contract v11): its secret setting's name, what it receives
-# from OANDA and does not carry, and the storage it asks for its raw records.
+# from OANDA and does not carry, the storage it asks for its raw records, and
+# from 0.5.0 its catalogue.
 declaration = "oanda.declaration:DECLARATION"
 
 [tool.ruff]

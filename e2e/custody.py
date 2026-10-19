@@ -128,6 +128,14 @@ def run():
         "--post", "/admin/connections/choose-account", "--from-page", "account_id",
         "--expect", f"Using {ACCOUNT}: the connection synthetic:{ACCOUNT}, read-only",
     )
+    # The data role (from 0.5.0): its Connection says the environment and the
+    # agents' guard's badge -- the synthetic OANDA reports paper and the
+    # setting is Practice, so Demo -- and its Datasets its catalogue.
+    runner("grant", "--level", "admin", "--role", "data")
+    connection = runner("page", "--level", "admin", "/", "--until", "Agents&#39; orders")
+    must("Practice" in connection and "Demo" in connection,
+         f"the data role's Connection does not say Practice and Demo: {connection[-1500:]}")
+    runner("page", "--level", "admin", "/datasets", "--until", "oanda:live")
     # 3. Linked through Account links.
     runner("page", "--level", "admin", "/admin/accounts", "--until", ACCOUNT)
     runner(

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -84,6 +84,20 @@ class Listed(Venue):
         return cast(Json, self._not_asked())
 
     async def stream(self, account_id: str) -> AsyncIterator[Json]:
+        self._not_asked()
+        yield {}
+
+    async def pricing(self, account_id: str, instruments: Sequence[str]) -> Json:
+        return cast(Json, self._not_asked())
+
+    async def candles(
+        self, account_id: str, instrument: str, from_time: str, to_time: str
+    ) -> list[Json]:
+        return cast(list[Json], self._not_asked())
+
+    async def pricing_stream(
+        self, account_id: str, instruments: Sequence[str]
+    ) -> AsyncIterator[Json]:
         self._not_asked()
         yield {}
 
