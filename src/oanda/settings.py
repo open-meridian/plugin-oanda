@@ -36,7 +36,7 @@ storage, and what is done with it past that, are the SDK's two settings per
 kind (`<kind>_window_days`, `<kind>_past_window`), from the kinds
 declaration.py declares: `activity`, `responses` and `trading`. This module
 declares neither, and reads them as delivered (`windows_from`). From 0.5.0 a
-fourth kind, `pricing`, holds what OANDA's pricing answered the data role.
+fourth kind, `prices`, holds what OANDA's pricing answered the data role.
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ DEFAULT_STALE_AFTER_HOURS = 24
 RESPONSES = "responses"
 ACTIVITY = "activity"
 TRADING = "trading"
-PRICING = "pricing"
+PRICES = "prices"
 ARCHIVED, KEPT, DELETED = "archived", "kept", "deleted"
 PAST_WINDOW = (ARCHIVED, KEPT, DELETED)
 # Each read's raw responses: 30 days by default, at least a day.
@@ -87,7 +87,7 @@ MOST_RETENTION_DAYS = 36500
 DEFAULT_TRADING_RETENTION_DAYS = 2555
 # What OANDA's pricing answered, behind each price and quote the data role
 # recorded: a week by default, since the lake keeps the rows themselves.
-DEFAULT_PRICING_RETENTION_DAYS = 7
+DEFAULT_PRICES_RETENTION_DAYS = 7
 
 # The roles each setting serves (contract v15): the token, the account and
 # the environment serve every role, since trading, reading the account and
@@ -196,13 +196,13 @@ class Windows:
     responses: Window = Window(DEFAULT_RAW_RETENTION_DAYS, KEPT)
     activity: Window = Window(DEFAULT_ACTIVITY_RETENTION_DAYS, KEPT)
     trading: Window = Window(DEFAULT_TRADING_RETENTION_DAYS, KEPT)
-    pricing: Window = Window(DEFAULT_PRICING_RETENTION_DAYS, KEPT)
+    prices: Window = Window(DEFAULT_PRICES_RETENTION_DAYS, KEPT)
 
     def of(self, kind: str) -> Window:
         return {
             RESPONSES: self.responses,
             TRADING: self.trading,
-            PRICING: self.pricing,
+            PRICES: self.prices,
         }.get(kind, self.activity)
 
 
@@ -294,7 +294,7 @@ def windows_from(values: Values) -> Windows:
         responses=_window(values, RESPONSES, DEFAULT_RAW_RETENTION_DAYS),
         activity=_window(values, ACTIVITY, DEFAULT_ACTIVITY_RETENTION_DAYS),
         trading=_window(values, TRADING, DEFAULT_TRADING_RETENTION_DAYS),
-        pricing=_window(values, PRICING, DEFAULT_PRICING_RETENTION_DAYS),
+        prices=_window(values, PRICES, DEFAULT_PRICES_RETENTION_DAYS),
     )
 
 

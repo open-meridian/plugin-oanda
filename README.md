@@ -48,7 +48,7 @@ The token, the account and the environment serve all three roles.
 
 The SDK also declares a window setting and a past-the-window setting for each
 kind of raw record: `activity` (seven years), `responses` (30 days),
-`trading` (seven years) and, from 0.5.0, `pricing` (a week), what OANDA's
+`trading` (seven years) and, from 0.5.0, `prices` (a week), what OANDA's
 pricing answered the data role.
 
 ## Setting it up
@@ -109,7 +109,7 @@ live. Connections shows each connection's badge, Demo, Live, or "Live
   history. The stream opens again from each pair's price now; a row is keyed
   by the pair and OANDA's own time, so one recorded before is unchanged.
 - **Raw records**: each answer a row was read from is kept first, in the
-  kind `pricing`, the SDK's raw store, a unit a UTC day; the stream's
+  kind `prices`, the SDK's raw store, a unit a UTC day; the stream's
   messages a row was read from as lines of the day's file per pair.
 - **Not carried**: OANDA's closeout bid and ask, counted on the heartbeat.
 

@@ -421,7 +421,7 @@ class LakeRig:
             recorder,
             self.connections,
             PairMap(None),
-            edge.RawStore(self.storage, kind="pricing"),
+            edge.RawStore(self.storage, kind="prices"),
             clock_ns=lambda: moments.of(self.clock()),
         )
 

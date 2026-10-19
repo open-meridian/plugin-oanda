@@ -40,9 +40,12 @@ session reached on the venue catalogue, for the agents' demo-only guard
   on the venue catalogue (`VenueCatalogue.environment`); the synthetic OANDA
   reports `paper`. Connections and Connection show each connection's badge,
   Demo, Live, or "Live (environment not confirmed)".
-- **The raw-record kind `pricing`**, a week by default, moved past its window
-  by the same pass as the other three; a pricing record is followed from a
+- **The raw-record kind `prices`** (label "Prices"), a week by default, moved past its window
+  by the same pass as the other three; a record of it is followed from a
   row's reference on Raw records. Not carried: OANDA's closeout bid and ask.
+- **Connections' act column** is a fixed 9rem, so "Enable trading" is no
+  longer clipped at 375 and 582 px; the environment's badge shares the
+  Trading cell.
 - **One stream** hears the lake's wants and the book's placements and
   instructions; placements heard before trading starts are left to its
   start's reads.
@@ -51,7 +54,7 @@ session reached on the venue catalogue, for the agents' demo-only guard
   suites pass as before.
 - **The pins**: open-meridian 0.31.0 and plugin-python:0.31.0, core v26's
   runtime and harness (core 17a13a2, merged as 648e25f, chart 0.1.308, by tag
-  and digest), and `meridian` 0.1.48 in `check.yaml`.
+  and digest), and `meridian` 0.1.49 in `check.yaml`.
 
 ## 0.4.0 (2026-10-19)
 

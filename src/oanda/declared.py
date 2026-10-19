@@ -15,7 +15,7 @@ And the storage it asks for, at the edge, for OANDA's raw records
 activity's record, seven years by default; each read's raw responses, 30
 days by default; each trading exchange (`trading`, as SnapTrade's,
 approved 2026-10-13), seven years by default; and from 0.5.0 what OANDA's
-pricing answered the data role (`pricing`, lake.py), a week by default; all
+pricing answered the data role (`prices`, lake.py), a week by default; all
 archivable.
 
 **Its catalogue** (from 0.5.0, the data role; spec/the-lake, "The
@@ -45,10 +45,10 @@ from meridian.declaration import NotCarried, RecordKind
 from .settings import (
     ACTIVITY,
     DEFAULT_ACTIVITY_RETENTION_DAYS,
-    DEFAULT_PRICING_RETENTION_DAYS,
+    DEFAULT_PRICES_RETENTION_DAYS,
     DEFAULT_RAW_RETENTION_DAYS,
     DEFAULT_TRADING_RETENTION_DAYS,
-    PRICING,
+    PRICES,
     RESPONSES,
     TRADING,
 )
@@ -62,10 +62,10 @@ RESPONSES_KIND = RecordKind(
 TRADING_KIND = RecordKind(
     TRADING, "Trading", window_days=DEFAULT_TRADING_RETENTION_DAYS, archivable=True
 )
-PRICING_KIND = RecordKind(
-    PRICING, "Pricing", window_days=DEFAULT_PRICING_RETENTION_DAYS, archivable=True
+PRICES_KIND = RecordKind(
+    PRICES, "Prices", window_days=DEFAULT_PRICES_RETENTION_DAYS, archivable=True
 )
-KINDS = (ACTIVITY_KIND, RESPONSES_KIND, TRADING_KIND, PRICING_KIND)
+KINDS = (ACTIVITY_KIND, RESPONSES_KIND, TRADING_KIND, PRICES_KIND)
 
 ACCOUNT = "oanda:account"
 FILL = "oanda:order-fill"

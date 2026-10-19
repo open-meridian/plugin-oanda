@@ -19,7 +19,7 @@ SDK's index says moved already is moved again only where it holds what the
 ledger noted. A pass ends by saying what each kind holds in storage on the
 heartbeat (`plugin.stored`). The stand-in store moves nothing.
 
-From 0.5.0 the data role's raw records, the kind `pricing`, are the SDK's
+From 0.5.0 the data role's raw records, the kind `prices`, are the SDK's
 (`meridian.edge.RawStore`, a unit a UTC day, lake.py), and the same pass
 moves them with the SDK's own `tend`, past their window as their settings
 say, today's never; what they hold is said beside the other three kinds.
@@ -39,7 +39,7 @@ from meridian.v1 import sidecar_pb2
 
 from .moments import of
 from .raw import RawStore, Unit
-from .settings import ACTIVITY, ARCHIVED, DELETED, PRICING, RESPONSES, TRADING, Windows
+from .settings import ACTIVITY, ARCHIVED, DELETED, PRICES, RESPONSES, TRADING, Windows
 
 log = logging.getLogger("oanda")
 
@@ -54,12 +54,12 @@ class Keeper:
         plugin: meridian.Plugin,
         store: RawStore,
         now: Callable[[], datetime],
-        pricing: edge.RawStore | None = None,
+        prices: edge.RawStore | None = None,
     ):
         self._plugin = plugin
         self._store = store
         self._now = now
-        self._pricing = pricing
+        self._prices = prices
         self._lock = asyncio.Lock()
         self._said: dict[str, str] = {}
 
@@ -101,18 +101,18 @@ class Keeper:
                         last_received_ns=last,
                     )
                 )
-            stored.extend(await self._tend_pricing(windows, now))
+            stored.extend(await self._tend_prices(windows, now))
             self._plugin.stored = stored
         return moved
 
-    async def _tend_pricing(self, windows: Windows, now: datetime) -> list[Any]:
+    async def _tend_prices(self, windows: Windows, now: datetime) -> list[Any]:
         """The data role's raw records moved past their window by the SDK's
         own pass, and what they hold: the span it says, or none."""
-        if self._pricing is None:
+        if self._prices is None:
             return []
-        window = windows.of(PRICING)
+        window = windows.of(PRICES)
         self._plugin.stored = []
-        await self._pricing.tend(self._plugin, window.days, window.past, now.date())
+        await self._prices.tend(self._plugin, window.days, window.past, now.date())
         return list(getattr(self._plugin, "stored", None) or [])
 
     def _movable(self, unit: Unit) -> bool:

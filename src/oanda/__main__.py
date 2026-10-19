@@ -51,7 +51,7 @@ from .linking import Links, failure
 from .page import Held, serve
 from .pairs import PairMap, pairs_file
 from .raw import RawStore, storage_root
-from .settings import PRICING, config_from
+from .settings import PRICES, config_from
 from .trading import POLL_SECONDS, SYNTHETIC_POLL_SECONDS, Trader
 
 log = logging.getLogger("oanda")
@@ -173,7 +173,7 @@ async def run() -> None:
                 plugin,
                 connections,
                 pairs,
-                edge.RawStore(storage_root(storage), kind=PRICING),
+                edge.RawStore(storage_root(storage), kind=PRICES),
             )
         keeper = Keeper(plugin, raw, utc_now, lake.raw if lake is not None else None)
         configured, wake = asyncio.Event(), asyncio.Event()

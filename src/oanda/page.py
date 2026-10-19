@@ -1034,7 +1034,7 @@ async def raw_records(request: meridian.Request) -> meridian.Response:
         # Only a record of the account the person may read is shown.
         if hit is not None and hit.account == connection.account_id:
             found = {"key": hit.key, "text": dumps(hit.document, indent=2)}
-    if key.startswith("pricing/") and held.lake is not None:
+    if key.startswith("prices/") and held.lake is not None:
         # The data role's: what OANDA's pricing answered, behind a price or a
         # quote in the lake. Market data, no account's.
         priced = held.lake.raw.get(key)

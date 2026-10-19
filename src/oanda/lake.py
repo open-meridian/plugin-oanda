@@ -50,7 +50,7 @@ day under its own key, so a close missed while stopped is recorded and one
 held is unchanged.
 
 **Raw records** (decisions/028): every answer OANDA's pricing gave a row is
-kept first, in the kind `pricing` (the SDK's `meridian.edge.RawStore`, a
+kept first, in the kind `prices` (the SDK's `meridian.edge.RawStore`, a
 unit a UTC day, moved past its window by archive.py's pass): a price read
 now and a day's candles as one record each, and the stream's messages a row
 was read from as lines of the day's file per pair. Each row names its

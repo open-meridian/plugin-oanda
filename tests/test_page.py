@@ -39,7 +39,7 @@ def held(linked: bool = True) -> tuple[PageClient, CustodyRig, Recorder]:
         recorder,
         rig.connections,
         PairMap(None),
-        edge.RawStore(rig.storage, kind="pricing"),
+        edge.RawStore(rig.storage, kind="prices"),
         clock_ns=lambda: moments.of(rig.clock()),
     )
     page.hold(page.Held(rig.syncer, rig.connections, links, asyncio.Event(), trader, lake))

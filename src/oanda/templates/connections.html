@@ -17,7 +17,7 @@
 {% if data.mode %}<p class="hint">Reaching: {{ data.mode }}.</p>{% endif %}
 {% endblock %}
 {% block vendor_columns %}
-{% if row is none %}<th>Trading</th><th class="wide-only">Placements</th><th></th>
+{% if row is none %}<th>Trading</th><th class="wide-only">Placements</th><th style="width: 9rem"><span class="visually-hidden">Act</span></th>
 {%- else %}<td>{% if row.badge == "Demo" %}{{ kit.badge("Demo", "good") }}{% elif row.badge == "Live" %}{{ kit.badge("Live", "warn") }}{% else %}{{ kit.badge(row.badge or "Live", "bad") }}{% endif %} {% if row.trading %}{{ kit.badge("Enabled", "good") }}{% else %}{{ kit.badge("Read-only", "warn") }}{% if row.trading_turned_off %} <span class="hint" title="{{ row.trading_turned_off }}">Turned off on a switch</span>{% endif %}{% endif %}</td><td class="wide-only">{{ row.working }} working, {{ row.held }} held, {{ row.unknown }} asked about, {{ row.waiting_for_a_value_date }} waiting for a value date</td>
 <td>{%- if not row.trading and caller.level_for("connectivity") == admin_level -%}
 {%- if "enable_trading" in caller.second_pair_of_eyes %}{{ kit.action(paths.enable_trading, "Prepare", fields={"connection_id": row.connection_id, "prepare": "1"}, label="Prepare: enable trading on " ~ row.connection) }}

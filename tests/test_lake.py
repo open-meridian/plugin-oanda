@@ -207,7 +207,7 @@ def test_a_quote_and_its_mid_are_exact_and_name_the_pair_as_oanda_quotes_it() ->
     assert ask.amount - bid.amount == Decimal("0.00020")
     assert as_decimal(eur_usd.bid_quantity) == Decimal(1_000_000)
     assert list(eur_usd.characteristics) == []
-    assert eur_usd.meta.raw.key.startswith("pricing/2026-10-13/pricing/")
+    assert eur_usd.meta.raw.key.startswith("prices/2026-10-13/pricing/")
     # EUR/GBP too, the euro's price in pounds: every pair it is the base of.
     assert as_money(by_key[f"EUR_GBP:q:{at}"].bid).currency_code == "GBP"
     [mids] = recorder.on("RecordPrices")
