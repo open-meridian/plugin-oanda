@@ -4,34 +4,41 @@ extending the SDK's `meridian/roles/<role>/<page>.html` and adding OANDA's
 own only in its blocks.
 
 - **Connection** (`/`, `read_connection`) and **Datasets** (`/datasets`,
-  `read_datasets`), at `admin`, for an admin of the data role (from 0.5.0):
-  the data role's, the SDK's records and templates for a venue listing pairs
-  (`meridian.roles.data.pairs`). Connection: the mode, the token set or not
-  (never its value), the environment and the agents' guard's badge, OANDA's
-  limits and the calls made, the venue, and the pricing stream; Datasets:
+  `read_datasets`), at `admin`. From 0.6.0 Connection is the SDK's one page
+  for a plugin holding the data role and connectivity
+  (`meridian.roles.connectivity.connection_pages`, 457), for an admin of
+  either: the data role's sections -- the mode, the token set or not (never
+  its value), OANDA's limits and the calls made, the venue, the pricing
+  stream, and each session's latency -- beside connectivity's: the
+  environment and the agents' guard's badge, the account in use read-only
+  or with trading enabled, and the placements working, held back or asked
+  about. "Enable trading" (`enable_trading`, `/enable-trading`, checked by
+  `check_enable_trading`) is the connectivity role's admin's: a new
+  connection is read-only until then. OANDA's own only in its template's
+  blocks: where no account is in use yet, where trading was turned off by a
+  switch of account, and the fills waiting for a value date. Datasets:
   `live` and `daily` as declared, licensed or not, each want, and OANDA's
   pairs. Neither shows a price: prices are the reading roles'.
 
 - **Connections** (`/admin/connections`, `read_connections`) and **Account
   links** (`/admin/accounts`, `read_account_links`; `link_account`), at
-  `admin`: setup only, account agnostic. Connections shows the connection
-  -- its environment and account, whether the token is set (never its
-  value), whether trading is enabled, and how many placements are working,
-  held back, asked about or waiting for a value date -- and, for an admin
-  of the `connectivity` role, "Enable trading" (`enable_trading`,
-  `/admin/connections/enable-trading`): a new connection is read-only until
-  then. From 0.3.0 its Account section lists the v20 accounts the token
-  reaches, a v1 account unusable with why, and an admin of each of the
-  plugin's roles picks the one to use ("Use this account", `choose_account`,
+  `admin`: custody's, setup only, account agnostic. Connections shows the
+  connection -- its environment and account, whether the token is set
+  (never its value), how the last read went and the agents' guard's badge
+  -- and its Account section lists the v20 accounts the token reaches, a
+  v1 account unusable with why, and an admin of each of the plugin's roles
+  picks the one to use ("Use this account", `choose_account`,
   `/admin/connections/choose-account`): the only usable one is preselected,
   never chosen until confirmed, and none is offered while the Account ID
   setting names the account (connection.py).
-- **Statements** (`/statements`, `read_statements`; `/` before 0.5.0, now the
-  data role's Connection) and **Raw records** (`/raw`), at
-  `write` and `read`: the account's statement, its rows by currency with
-  what is pending on each value date, for a person who may read the
-  deployment's account it is linked to; and OANDA's raw records kept for
-  it, with a row's reference followed. Refresh (`read_oanda_now`) under Open.
+- **Statements** (`/statements`, `read_statements`), at `write` and
+  `read`: the account's statement, its rows by currency with what is
+  pending on each value date, for a person who may read the deployment's
+  account it is linked to. Refresh (`read_oanda_now`) under Open. **Raw
+  records** (`/raw`), from 0.6.0 the SDK's
+  (`meridian.roles.connectivity.raw_records_page`): each kind kept and its
+  window, and a row's reference followed to OANDA's record, shown to a
+  person who may read the account it is linked or mapped to.
 
 Every act is a POST carrying the SDK's CSRF token, and names the read tool
 that checks it without changing anything (`checked_by`, contract v20).
@@ -40,6 +47,7 @@ that checks it without changing anything (`checked_by`, contract v20).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import http.server
 import json
 from collections.abc import Mapping
@@ -49,6 +57,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode
 
 import meridian
+from meridian.roles import connectivity as connectivity_role
 from meridian.roles import custody as custody_role
 from meridian.roles import data as data_role
 from meridian.roles.data import pairs as role_pairs
@@ -59,9 +68,8 @@ from .custody import Row, Syncer, account_kind
 from .declared import CATALOGUE, KINDS, VENUE_NAME
 from .lake import ENTITLED, Lake, connection_read
 from .linking import Links, refusal, refused
-from .raw import dumps
 from .settings import LIVE, PAPER, TOKEN, label
-from .trading import Trader
+from .trading import POLL_SECONDS, Trader
 
 TITLE = "OANDA"
 CUSTODY = "custody"
@@ -76,18 +84,17 @@ pages = meridian.Pages(TITLE, templates=Path(__file__).parent / "templates", kit
 CONNECTION = "/"
 DATASETS = "/datasets"
 STATEMENTS = "/statements"
-RAW = "/raw"
+RAW = connectivity_role.RAW
 CONNECTIONS = "/admin/connections"
 ACCOUNTS = "/admin/accounts"
 READ = "/read"
-ENABLE_TRADING = f"{CONNECTIONS}/enable-trading"
 CHOOSE_ACCOUNT = f"{CONNECTIONS}/choose-account"
 LINK = "/admin/accounts/link"
 CHECK = "/check"
 INTENTS = ("link", "create", "unlink")
 pages.environment.globals["paths"] = {
     "read": READ,
-    "enable_trading": ENABLE_TRADING,
+    "connections": CONNECTIONS,
     "choose_account": CHOOSE_ACCOUNT,
     "link": LINK,
     "raw": RAW,
@@ -113,6 +120,9 @@ class Held:
     wake: asyncio.Event
     trader: Trader | None = None
     lake: Lake | None = None
+    #: The plugin's `meridian.roles.Latency` (contract v27): each session's
+    #: latency, on Connection's Sessions.
+    latency: Any = None
 
 
 _held: Held | None = None
@@ -208,39 +218,152 @@ def _data_mode() -> str:
     return "Live" if config.environment == LIVE else "Practice"
 
 
-def _connection_read() -> records.LakeConnectionRead:
+def _credentials() -> list[data_role.Credential]:
+    config = _now().connections.config
+    return [data_role.Credential(label(TOKEN), set=config.credentials is not None)]
+
+
+async def _lake_connection(request: meridian.Request) -> records.LakeConnectionRead:
+    """Connection's own record (`read_connection`), the SDK's sections for
+    connectivity added to it (`connection_pages`): the data role's, and
+    OANDA's nuance for trading -- where a switch of account turned trading
+    off, and the fills waiting for a value date."""
     held = _now()
-    config = held.connections.config
-    credentials = [data_role.Credential(label(TOKEN), set=config.credentials is not None)]
-    read: records.LakeConnectionRead = connection_read(
-        held.lake,
-        credentials,
-        _data_mode(),
-        environment=_environment_shown(config.environment_setting),
-        reached_environment=_reached(),
-        badge=_badge(),
+    read: records.LakeConnectionRead = connection_read(held.lake, _credentials(), _data_mode())
+    current = held.connections.current
+    shown = held.trader.shown if held.trader is not None else None
+    return dataclasses.replace(
+        read,
+        trading_turned_off=""
+        if current is None or current.trading
+        else _turned_off(connection_id=current.connection_id),
+        waiting_for_a_value_date=shown.waiting if shown else 0,
     )
-    return read
 
 
-@pages.page(
-    CONNECTION,
-    "Connection",
-    levels="admin",
-    roles=DATA,
-    answers=records.LakeConnectionRead,
-    name="read_connection",
-    description=(
-        "The data role's connection to OANDA's pricing: the mode (Practice, Live, Sample "
-        "data or No key), whether the access token is set (never its value), the environment "
-        "and the agents' guard's badge (Demo only while the setting says Practice and the "
-        "session reached OANDA's practice host), OANDA's limits and the calls made, OANDA as "
-        "the venue master holds it, and the pricing stream: its state, the pairs on it, its "
-        "reconnects and messages. No price."
-    ),
+class _Connectivity:
+    """OANDA's Trader as the SDK's connectivity pages read a Trader (0.6.0):
+    the account the connection is for, by its venue account code, OANDA's
+    v20 account ID; whether trading is enabled on it (OANDA's trading is the
+    connection's, its environment and account: a change of either is a new
+    connection, read-only); its catalogue; whether its `ems` mapped it here;
+    the placements' counts; and "Enable trading" made on the connection."""
+
+    def __init__(self, held: Held, trader: Trader) -> None:
+        self._held = held
+        self._trader = trader
+        self.me = trader.me
+        self.shown = trader.shown
+
+    @property
+    def reached(self) -> tuple[str, ...]:
+        current = self._held.connections.current
+        return (current.code,) if current is not None else ()
+
+    def _current(self, code: str) -> Any:
+        current = self._held.connections.current
+        return current if current is not None and current.code == code else None
+
+    def trading_on(self, code: str) -> bool:
+        current = self._current(code)
+        return bool(current is not None and current.trading)
+
+    def offered(self, code: str) -> tuple[tuple[int, tuple[int, ...]], ...]:
+        current = self._current(code)
+        return self._trader.catalogue(current) if current is not None else ()
+
+    def mapped(self) -> frozenset[str]:
+        held = self._held.links.scope.venue_account_map
+        if held is None:
+            return frozenset()
+        return frozenset(
+            mapping.venue_account_code
+            for mapping in held.mappings
+            if mapping.connectivity_instance_id == self.me and mapping.venue_account_code
+        )
+
+    async def enable(self, code: str, why: Mapping[str, Any]) -> None:
+        current = self._current(code)
+        if current is None:
+            return
+        self._held.connections.enable_trading(
+            current.connection_id, str(why.get("enabled_by") or "")
+        )
+        await self._trader.publish()
+
+
+class _RawRecords:
+    """OANDA's raw records as the SDK's Raw records page reads them, by a
+    row's reference: a record of the account in use, or what OANDA's pricing
+    answered behind a price or a quote in the lake (`prices/`)."""
+
+    def __init__(self, held: Held) -> None:
+        self._held = held
+
+    def get(self, key: str) -> Any:
+        held = self._held
+        if key.startswith("prices/"):
+            return held.lake.raw.get(key) if held.lake is not None else None
+        current = held.connections.current
+        if held.syncer.raw is None or current is None:
+            return None
+        hit = held.syncer.raw.find(key)
+        # Only a record of the account in use: the SDK shows it to a person
+        # who may read the account it is linked or mapped to.
+        return hit.document if hit is not None and hit.account == current.account_id else None
+
+
+class _State:
+    """The plugin's state as the SDK's connectivity pages read it
+    (`connectivity.TradingState`)."""
+
+    @property
+    def trader(self) -> _Connectivity | None:
+        held = _now()
+        return _Connectivity(held, held.trader) if held.trader is not None else None
+
+    @property
+    def venue(self) -> Any:
+        return _now().connections.venue()
+
+    @property
+    def scope(self) -> meridian.AccountScope:
+        return _now().links.scope
+
+    @property
+    def store(self) -> _RawRecords:
+        return _RawRecords(_now())
+
+    @property
+    def values(self) -> dict[str, str]:
+        windows = _now().connections.config.windows
+        return {f"{kind.name}_past_window": windows.of(kind.name).past for kind in KINDS}
+
+
+_STATE = _State()
+
+
+def _state() -> _State:
+    return _STATE
+
+
+def _latency() -> Any:
+    return _now().latency
+
+
+connectivity_role.connection_pages(
+    pages,
+    _state,
+    _lake_connection,
+    venue=VENUE_NAME,
+    credentials=_credentials,
+    environment=lambda: _environment_shown(_now().connections.config.environment_setting),
+    environment_setting=lambda: _now().connections.config.environment_setting,
+    updates=lambda: f"OANDA's transaction stream, and a read every {POLL_SECONDS} seconds",
+    environment_to_save=_legacy_setting,
+    latency=_latency,
+    template="connection.html",
 )
-async def connection(request: meridian.Request) -> meridian.Response:
-    return pages.answer("connection.html", _connection_read())
 
 
 def _datasets_read() -> role_pairs.DatasetsRead:
@@ -282,11 +405,9 @@ def _connections_read() -> records.ConnectionsRead:
     listing = held.connections.listing
     choice = held.connections.choice
     status = held.syncer.status
-    shown = held.trader.shown if held.trader is not None else None
     credentials = [custody_role.Credential(label(TOKEN), set=config.credentials is not None)]
     rows = []
     if connection is not None:
-        by, _ = held.connections.enabled_by(connection.connection_id)
         state = {
             "SYNC_STATE_CURRENT": "Current",
             "SYNC_STATE_STALE": "Stale",
@@ -304,15 +425,6 @@ def _connections_read() -> records.ConnectionsRead:
                 environment=connection.environment,
                 reached_environment=connection.venue.environment,
                 badge=_badge(),
-                trading=connection.trading,
-                trading_enabled_by=by,
-                trading_turned_off=""
-                if connection.trading
-                else _turned_off(connection_id=connection.connection_id),
-                working=shown.working if shown else 0,
-                held=shown.held if shown else 0,
-                unknown=shown.unknown if shown else 0,
-                waiting_for_a_value_date=shown.waiting if shown else 0,
             )
         )
     return records.ConnectionsRead(
@@ -406,9 +518,8 @@ async def _prepared_account(request: meridian.Request) -> str:
     name="read_connections",
     description=(
         "The OANDA connection: its environment and account, whether the access token is set "
-        "(never its value), how the last read went, whether trading is enabled on it (a new "
-        "connection is read-only), and how many placements it is working, holding back, "
-        "asking OANDA about, or holding for a value date. And the accounts the token reaches "
+        "(never its value), how the last read went, and the agents' guard's badge (its "
+        "trading is read_connection's). And the accounts the token reaches "
         "(reached; a v1 account unusable, with why), the one in use and whether the Account "
         "ID setting or an admin's choice names it, and the one preselected because it is "
         "the only usable one, not in use until choose_account confirms it. No account's data."
@@ -432,85 +543,6 @@ async def admin(request: meridian.Request) -> meridian.Response:
     query = urlencode(request.query)
     return meridian.Response(
         "", 303, headers=(("location", CONNECTIONS + (f"?{query}" if query else "")),)
-    )
-
-
-def _asked_connection(request: meridian.Request) -> str:
-    asked: records.ConnectionAsked | None = request.params
-    connection_id = asked.connection_id.strip() if asked is not None else ""
-    current = _now().connections.current
-    if current is None:
-        pages.refuse(
-            "Nothing to enable until OANDA's settings are given.", reason="unavailable"
-        )
-    if connection_id != current.connection_id:
-        pages.refuse(
-            "No such connection.",
-            ("connection_id", "not the connection the settings name"),
-            reason="not_found",
-        )
-    return connection_id
-
-
-@pages.route(
-    ENABLE_TRADING,
-    levels="admin",
-    roles=CONNECTIVITY,
-    methods=["POST"],
-    params=records.ConnectionAsked,
-    answers=records.TradingEnabled,
-    name="enable_trading",
-    checked_by="check_enable_trading",
-    made_on=CONNECTIONS,
-    description=(
-        "Enable trading on the OANDA connection: until then it is read-only, and every "
-        "placement on it is rejected unsupported. The connection is the settings' "
-        "environment and account; a change of either is a new connection, read-only again."
-    ),
-)
-async def enable_trading(request: meridian.Request) -> meridian.Response:
-    if (too_big := _oversized(request)) is not None:
-        return too_big
-    held = _now()
-    connection_id = _asked_connection(request)
-    held.connections.enable_trading(
-        connection_id, request.caller.display_name or request.caller.subject
-    )
-    if held.trader is not None:
-        await held.trader.publish()
-    said = f"Trading enabled on {connection_id}: placements on it are now sent to OANDA."
-    if request.tool_name:
-        return pages.answer(
-            "connections.html", records.TradingEnabled(connection_id, True, said)
-        )
-    return _connections(request, Notice(said, "good"))
-
-
-@pages.route(
-    ENABLE_TRADING + CHECK,
-    levels="admin",
-    roles=CONNECTIVITY,
-    methods=["POST"],
-    params=records.ConnectionAsked,
-    answers=records.TradingEnabled,
-    reads=True,
-    name="check_enable_trading",
-    description=(
-        "Check enable_trading without enabling anything: whether the connection is the one "
-        "the settings name, and whether trading is enabled on it already."
-    ),
-)
-async def check_enable_trading(request: meridian.Request) -> meridian.Response:
-    connection_id = _asked_connection(request)
-    current = _now().connections.current
-    already = current is not None and current.trading
-    said = (
-        f"Trading is enabled on {connection_id} already."
-        if already
-        else f"Would enable trading on {connection_id}."
-    )
-    return pages.answer(
-        "connections.html", records.TradingEnabled(connection_id, already, said)
     )
 
 
@@ -1015,52 +1047,10 @@ async def check_read_oanda_now(request: meridian.Request) -> meridian.Response:
 
 # ── Raw records, at write and read ──────────────────────────────────────────
 
-
-@pages.page(
-    RAW,
-    "Raw records",
-    levels=["write", "read"],
-    roles=CUSTODY,
-    tool=False,
+connectivity_role.raw_records_page(
+    pages,
+    _state,
+    kinds=list(KINDS),
     why="a raw record is followed from a row's reference, and read as received",
+    template="raw.html",
 )
-async def raw_records(request: meridian.Request) -> meridian.Response:
-    held = _now()
-    kept: list[dict[str, Any]] = []
-    found: dict[str, Any] | None = None
-    key = request.query.get("ref", "")
-    connection = held.connections.current
-    if _readable(request.caller) and held.syncer.raw is not None and connection is not None:
-        store = held.syncer.raw
-        for kind in ("responses", "trading", "activity"):
-            for record in store.latest(kind, connection.account_id, most=5):
-                kept.append({"key": record.key, "kind": kind, "at": record.at})
-        hit = store.find(key) if key else None
-        # Only a record of the account the person may read is shown.
-        if hit is not None and hit.account == connection.account_id:
-            found = {"key": hit.key, "text": dumps(hit.document, indent=2)}
-    if key.startswith("prices/") and held.lake is not None:
-        # The data role's: what OANDA's pricing answered, behind a price or a
-        # quote in the lake. Market data, no account's.
-        priced = held.lake.raw.get(key)
-        if priced is not None:
-            found = {"key": key, "text": dumps(priced, indent=2)}
-    plugin = request.plugin
-    return meridian.Response(
-        pages.render(
-            "raw.html",
-            kinds=list(KINDS),
-            stored=list(getattr(plugin, "stored", []) or []),
-            past={
-                f"{kind.name}_past_window": held.syncer.connections.config.windows.of(
-                    kind.name
-                ).past
-                for kind in KINDS
-            },
-            key=key,
-            found=plugin.find_record(key) if key and hasattr(plugin, "find_record") else None,
-            kept=kept,
-            record=found,
-            readable=_readable(request.caller),
-        )
-    )

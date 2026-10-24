@@ -4,6 +4,7 @@ over a read of the synthetic OANDA. SIMULATED ONLY."""
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from typing import Any, cast
 
 import meridian
@@ -54,38 +55,49 @@ def test_every_page_at_admin_shows_no_account_data() -> None:
     client.assert_no_account_data("98733.8860", "85493.88600", "10000", "2026-10-15")
 
 
-def test_connections_say_read_only_and_offer_enable_trading_to_connectivitys_admin() -> None:
+def test_connection_says_read_only_and_offers_enable_trading_to_connectivitys_admin() -> None:
+    """From 0.6.0 the connection's trading is the SDK's one Connection for
+    the data role and connectivity (457), Connections custody's alone."""
     client, rig, _ = held()
-    shown = client.get("/admin/connections", "admin").body
+    shown = client.get("/", "admin").body
     assert "Read-only" in shown and "Enable trading" in shown
-    read = client.call_tool("read_connections", level="admin")
-    (connection,) = read.data["connections"]
-    assert connection["trading"] is False
-    assert connection["connection_id"] == f"synthetic:{ACCOUNT}"
-    assert read.data["credentials"] == [{"label": "Access token", "set": False}]
+    read = client.call_tool("read_connection", level="admin").data
+    assert read["trading"]["accounts"] == [
+        {"venue_account_code": ACCOUNT, "trading": False, "order_types": [], "mapped": False}
+    ]
+    assert read["credentials"] == [{"label": "Access token", "set": False}]
+    connections = client.get("/admin/connections", "admin").body
+    assert "Enable trading" not in connections and "Read-only" not in connections
+    (connection,) = client.call_tool("read_connections", level="admin").data["connections"]
+    assert connection["connection_id"] == f"synthetic:{ACCOUNT}" and "trading" not in connection
 
 
 def test_enable_trading_and_its_check() -> None:
-    client, rig, _ = held()
-    connection_id = f"synthetic:{ACCOUNT}"
+    client, rig, recorder = held()
     checked = client.call_tool(
-        "check_enable_trading", {"connection_id": connection_id}, level="admin"
+        "check_enable_trading", {"venue_account_code": ACCOUNT}, level="admin"
     )
-    assert checked.outcome == "unchanged" and checked.data["trading"] is False
+    assert checked.outcome == "unchanged" and "Would enable trading" in checked.data["said"]
     refused = client.call_tool(
-        "enable_trading", {"connection_id": "practice:nobody"}, level="admin"
+        "enable_trading", {"venue_account_code": "nobody"}, level="admin"
     )
-    assert refused.outcome == "refused" and refused.paths == ["connection_id"]
+    assert refused.outcome == "refused" and refused.paths == ["venue_account_code"]
     done = client.post(
-        "/admin/connections/enable-trading",
-        "admin",
-        {"connection_id": connection_id},
-        roles=["connectivity"],
+        "/enable-trading", "admin", {"venue_account_code": ACCOUNT}, roles=["connectivity"]
     )
     assert done.status == 200 and "Trading enabled on" in done.body
     current = rig.connections.current
     assert current is not None and current.trading
-    assert "Read-only" not in client.get("/admin/connections", "admin").body
+    assert "Read-only" not in client.get("/", "admin").body
+    read = client.call_tool("read_connection", level="admin").data
+    (account,) = read["trading"]["accounts"]
+    assert account["trading"] is True
+    assert account["order_types"] == ["market", "limit", "stop"]
+    # Under the data role's admin alone, nothing is enabled.
+    alone = client.post(
+        "/enable-trading", "admin", {"venue_account_code": ACCOUNT}, roles=["data"]
+    )
+    assert alone.status == 403
 
 
 def test_the_statement_for_a_person_who_may_read_the_linked_account() -> None:
@@ -102,11 +114,14 @@ def test_the_statement_for_a_person_who_may_read_the_linked_account() -> None:
 
 
 def test_a_rows_raw_record_is_followed() -> None:
+    """From 0.6.0 the SDK's Raw records: the record shown to a person who
+    may read the account it is linked to, and to no one else."""
     client, rig, recorder = held()
     key = recorder.on("RecordHolding")[0].raw_record.key
     shown = client.get("/raw", "read", ref=key).body
-    assert "The record a row references" in shown
-    assert "lastTransactionID" in shown
+    assert "The record" in shown and "lastTransactionID" in shown
+    stranger = PageClient(page.pages, recorder, read=["ACC-ELSEWHERE"], roles=["custody"])
+    assert "lastTransactionID" not in stranger.get("/raw", "read", ref=key).body
 
 
 def test_the_account_links_and_a_link() -> None:
@@ -136,15 +151,16 @@ def test_account_links_carries_plain_forms_and_links_through_them() -> None:
     assert done.status == 200 and "Created E2E OANDA and linked" in done.body
 
 
-def test_the_data_roles_connection_says_the_environment_and_its_badge() -> None:
+def test_the_connection_says_the_environment_and_its_badge() -> None:
     client, _, _ = held()
     read = client.call_tool("read_connection", level="admin")
     assert read.data["mode"] == "Sample data"
-    assert read.data["environment"] == "Practice"
-    assert read.data["reached_environment"] == "paper" and read.data["badge"] == "Demo"
+    trading = read.data["trading"]
+    assert trading["environment"] == "Practice"
+    assert trading["reached_environment"] == "paper" and trading["badge"] == "Demo"
     assert read.data["venue"] == "OANDA" and read.data["stream_state"] == "off"
     shown = client.get("/", "admin", roles="data").body
-    assert "Agents&#39; orders" in shown and "Demo" in shown
+    assert "agents may place orders only on a Demo connection" in shown and "Demo" in shown
     # Under Open or View, the data role's Connection is not served.
     assert client.get("/", "read").status == 403
 
@@ -176,6 +192,32 @@ def test_connections_carry_the_demo_badge_and_say_an_old_environment_value() -> 
     assert connection["badge"] == "Live (environment not confirmed)"
     shown = client.get("/admin/connections", "admin").body
     assert "no longer offered: save it again" in shown
-    data = client.call_tool("read_connection", level="admin").data
+    data = client.call_tool("read_connection", level="admin").data["trading"]
     assert data["environment"] == "Not set: save it again"
     assert data["badge"] == "Live (environment not confirmed)"
+    assert data["environment_to_save"] == "practice"
+
+
+def test_connection_draws_both_roles_sections_and_each_sessions_latency() -> None:
+    """From 0.6.0 the SDK's one Connection for the data role and connectivity
+    (457): the data role's sections beside connectivity's, and Sessions once
+    a session is measured (contract v27)."""
+    import re
+
+    from meridian.roles import Latency
+
+    client, rig, recorder = held()
+    shown = client.get("/", "admin").text
+    assert re.findall(r"<h2>([^<]*)</h2>", shown) == [
+        "Key", "Limits and use", "Stream", "Environment", "Accounts", "Placements",
+    ]  # fmt: skip
+    latency = Latency(recorder)
+    latency.rtt("orders", 12_000_000)
+    held_now = page._now()
+    page.hold(dataclasses.replace(held_now, latency=latency))
+    shown = client.get("/", "admin").text
+    assert "<h2>Sessions</h2>" in shown and "RTT p99" in shown
+    (session,) = client.call_tool("read_connection", level="admin").data["trading"][
+        "session_latency"
+    ]
+    assert session["session"] == "orders"

@@ -13,7 +13,7 @@ and
 [Using a custody plugin](https://open-meridian.dev/how-to/using-a-custody-plugin/).
 These sections cover what is OANDA's own.
 
-## Its three roles
+## Its data role
 
 **Data**: it records OANDA's prices in the lake, for the plugins your
 deployment entitles to read them. Two datasets:
@@ -31,12 +31,21 @@ A pair is a price of its base currency in its quote currency, exactly as
 OANDA quotes it: EUR_USD is the euro's price in dollars. Nothing is inverted
 or crossed. Only currency pairs are recorded, not metals or CFDs.
 
+OANDA's prices are its own and real time: neither dataset declares a delay.
+The pricing stream sends a price only when it changes, and a heartbeat every
+five seconds. Each heartbeat is recorded as the live dataset's sign of life,
+so an unchanged quote is still known to be current.
+
+## Its trading and custody roles
+
 **Connectivity**: it places the orders your execution plugin (an `ems`)
 sends it at OANDA, and reports acknowledgements, rejections, fills,
 commissions, each trade's financing, and each daily value-date roll. It also
 reports the fills of orders taken in OANDA's own platform or app, or by
 OANDA itself (a stop loss, a margin closeout), on no order, for your
-execution plugin to accept to an order or answer DK.
+execution plugin to accept to an order or answer DK. It takes market,
+limit and stop orders, each placed directly at OANDA: OANDA is the
+counterparty to every order, so there is no request for quote.
 
 **Custody**: it reads the chosen account as the custodian's view: the
 account, its sync status, a statement each read, and its activity.

@@ -15,7 +15,11 @@ stream. As `data` (from 0.5.0) it records OANDA's prices in the lake
 (lake.py): what the lake wants, and each standing want kept current from
 the pricing stream. What OANDA answered is kept as raw records in the
 storage the deployment grants (raw.py, and the SDK's store for the data
-role's), and moved past each kind's window (archive.py).
+role's), and moved past each kind's window (archive.py). From 0.6.0 its
+sessions' latency -- the pricing stream's and the order calls' -- is
+recorded on one `meridian.roles.Latency` and shown on Connection's
+Sessions; core receives ReportLatency from contract v28 (ruling 515), so
+nothing of it is sent yet.
 
 With `data` and `connectivity` both, the lake's wants and the book's
 placements and instructions are heard on one stream, opened at start;
@@ -39,7 +43,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import meridian
-from meridian import edge
+from meridian import edge, roles
 
 from .archive import Keeper
 from .connection import Connections
@@ -149,6 +153,8 @@ async def run() -> None:
             plugin.identity.instance_id,
             ", ".join(plugin.identity.roles) or "none",
         )
+        # Each session's latency (contract v27): recorded, not yet reported.
+        latency = roles.Latency(plugin)
         storage = edge.storage_dir()
         raw = RawStore(storage_root(storage), storage)
         connections = Connections(storage, utc_now)
@@ -174,6 +180,7 @@ async def run() -> None:
                 connections,
                 pairs,
                 edge.RawStore(storage_root(storage), kind=PRICES),
+                latency=latency,
             )
         keeper = Keeper(plugin, raw, utc_now, lake.raw if lake is not None else None)
         configured, wake = asyncio.Event(), asyncio.Event()
@@ -192,16 +199,20 @@ async def run() -> None:
                 waiting=Kept(file_in(storage, "waiting.json"), []),
                 rolling=Kept(file_in(storage, "rolling.json"), {}),
                 scope=lambda: links.scope,
+                latency=latency,
             )
         if lake is not None:
             # The data role's figures beside custody's on the Summary.
             syncer.more_figures = lake.figures
-        page = serve(plugin, Held(syncer, connections, links, wake, trader, lake), port)
+        page = serve(
+            plugin, Held(syncer, connections, links, wake, trader, lake, latency), port
+        )
         log.info("serving its pages on 127.0.0.1:%d", port)
         tasks = [
             following,
             asyncio.create_task(watch_settings(plugin, connections, keeper, configured, wake)),
             asyncio.create_task(poll(syncer, keeper, configured, wake)),
+            asyncio.create_task(again(latency.run, "the latency recorder")),
         ]
         if trader is not None:
             if lake is not None:

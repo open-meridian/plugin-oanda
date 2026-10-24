@@ -20,9 +20,12 @@ for an Open Meridian deployment. The plugin holds three roles:
   OANDA's daily candle, on its day ending at 17:00 New York (ruled
   2026-10-13: "later, in the same repository").
 
-Version 0.5.1 (not released) is built on open-meridian 0.31.1, contract v26:
-the `data` role, and the environment its session reached on its venue
-catalogue, the second key of the agents' demo-only guard. Its whole
+Version 0.6.0 (not released) is built on open-meridian 0.32.2, contract v27:
+one Connection for its data and connectivity roles, the SDK's (ruling 457),
+with its Raw records; the live dataset's liveness from the pricing stream's
+heartbeats and no declared delay; each session's latency, recorded and
+shown, not yet reported (core receives it from contract v28); and its
+placement types on its catalogue, direct market access alone. Its whole
 declaration -- its settings, pages and tools, the accounts it names by
 OANDA's IDs, its storage and its catalogue -- and its documentation are in
 [docs/](docs/), which a deployment shows on the plugin's Documentation tab.
@@ -84,7 +87,7 @@ plugin reads the second from the host it calls, `api-fxpractice.oanda.com`
 `paper` and `api-fxtrade.oanda.com` `live`, and publishes it on its venue
 catalogue (`VenueCatalogue.environment`). The synthetic OANDA reaches no
 venue and reports `paper`. Anything else, a mismatch among it, counts as
-live. Connections shows each connection's badge, Demo, Live, or "Live
+live. Connection and Connections show the badge, Demo, Live, or "Live
 (environment not confirmed)".
 
 ## Prices in the lake
@@ -112,11 +115,26 @@ live. Connections shows each connection's badge, Demo, Live, or "Live
   kind `prices`, the SDK's raw store, a unit a UTC day; the stream's
   messages a row was read from as lines of the day's file per pair.
 - **Not carried**: OANDA's closeout bid and ask, counted on the heartbeat.
+- **Liveness** (from 0.6.0, contract v27): OANDA's pricing stream sends a
+  price only on change, and a heartbeat every five seconds. The latest
+  price or heartbeat is the live dataset's sign of life, recorded once a
+  pass at OANDA's own time for OANDA's venue (RecordLiveness), so a quote
+  in force is confirmed though it has not changed. Neither dataset declares
+  a delay (`declared_delay_ns` 0): OANDA's prices are its own, in real
+  time. A quote's age runs from its OANDA `time` (its `event` source time),
+  or from the liveness after it.
+- **Latency** (from 0.6.0): the `pricing-stream` session's sign of life,
+  clock skew from the heartbeat's time, reconnects, 429s and round trip
+  (the REST pricing calls', the stream having no ping), and each row's age
+  at the edge, its feed delay; and the `orders` session's round trips,
+  order acknowledgements and fill delays. Shown on Connection's Sessions;
+  not yet sent: core receives ReportLatency from contract v28 (ruling 515).
 
 ## Trading
 
 A new connection is **read-only**. An admin of the `connectivity` role
-enables trading on it under Connections, "Enable trading". Until then, every
+enables trading on it on Connection, "Enable trading" beside the account in
+use (`enable_trading`, by its venue account code). Until then, every
 placement on it is rejected `unsupported`. The connection is the
 `environment` together with the account (chosen on Connections, or named by
 `account_id`), so changing either makes a new connection, which is
@@ -125,8 +143,13 @@ on it, whether by choosing another account on Connections or by changing
 the `account_id` or `environment` setting. Returning to it finds it
 read-only, and a person enables trading on it again: trading never comes
 back on by itself. Each time this happens it is recorded in the plugin's
-storage, with the change that caused it, who made it and when. Connections
-and `read_connections` say so for the connection in use.
+storage, with the change that caused it, who made it and when. Connection
+and `read_connection` say so for the connection in use.
+
+**Placement types** (from 0.6.0, contract v27): direct market access alone,
+on its catalogue while trading is enabled. OANDA is the counterparty to every
+order, at the price it streams, so a request for quote, or any other type,
+is rejected `unsupported`, nothing sent.
 
 - **An FX order** is an order in the base currency's cash instrument, with
   its limit or stop price in the quote currency. From contract v23 the order
@@ -194,8 +217,9 @@ cancel, a pause, a stop and a restart. **On a controlled clock** (decision
 66): before the order path, the e2e sets the synthetic OANDA's clock to the
 coming Tuesday at 12:00 New York, so its fills trade on a Tuesday and its
 roll is that day's 17:00, whatever day the e2e runs; the clock runs on from
-there and is only ever set forward. The Makefile pins core v26's runtime
-and harness as published (core 17a13a2, merged as 648e25f, chart 0.1.308);
+there and is only ever set forward. Trading is enabled on Connection, by
+the account's venue account code. The Makefile pins core v27's runtime and
+harness as published (core a5da59a, merged as 6d346b3, chart 0.1.310);
 `make e2e RUNTIME_IMAGE=... HARNESS_IMAGE=...` tries another.
 
 **Safety:** tests and `make e2e` use the synthetic OANDA only. Any run on a

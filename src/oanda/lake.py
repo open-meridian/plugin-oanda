@@ -49,6 +49,19 @@ dataset's past week is recorded again for a standing want heard again, each
 day under its own key, so a close missed while stopped is recorded and one
 held is unchanged.
 
+**Liveness and latency** (contract v27; rulings 418 and 371, the
+latency spec's convention for OANDA). OANDA's pricing stream sends a price
+only when it changes, and a heartbeat every five seconds, each with OANDA's
+`time`. The latest message or heartbeat heard is the live dataset's sign of
+life: recorded once a pass, at OANDA's own time, for OANDA's venue
+(`Wants.liveness`, RecordLiveness), it confirms every quote in force. The
+stream's session (`pricing-stream`) keeps its last sign of life, its clock
+skew from the heartbeat's `time`, its reconnects and OANDA's 429s, and its
+round trip as the REST pricing calls' durations (the stream has no ping);
+each row recorded for a standing want has its age at the edge recorded, the
+feed delay -- recorded, not yet reported: core receives ReportLatency from
+contract v28 (ruling 515). OANDA's own prices carry no declared delay.
+
 **Raw records** (decisions/028): every answer OANDA's pricing gave a row is
 kept first, in the kind `prices` (the SDK's `meridian.edge.RawStore`, a
 unit a UTC day, moved past its window by archive.py's pass): a price read
@@ -102,6 +115,8 @@ LATEST_DAYS = 7
 MOST_DAYS = 3660
 #: How long the stream waits before it opens again after a drop, at most.
 MOST_WAIT_SECONDS = 60.0
+#: The pricing stream's session, as its latency names it (contract v27).
+STREAM_SESSION = "pricing-stream"
 
 #: What OANDA allows, and what the plugin spends of it, in words.
 ALLOWED = "OANDA's v20 API: at most 120 requests a second, and 2 new streams a second"
@@ -248,6 +263,10 @@ class Stream:
     messages: int = 0
     last_message_ns: int = 0
     last_error: str = ""
+    #: OANDA's time of the latest price or heartbeat heard, and the liveness
+    #: last recorded from it (contract v27).
+    alive_ns: int = 0
+    liveness_ns: int = 0
 
 
 @dataclass
@@ -277,6 +296,9 @@ class Lake:
         default_factory=lambda: data.Session("live", ENDPOINTS, data.Limits(ALLOWED, SPENT))
     )
     stream: Stream = field(default_factory=Stream)
+    #: The plugin's `meridian.roles.Latency`, where it keeps one (contract
+    #: v27): the stream's session and each row's age at the edge.
+    latency: Any = None
     #: The pairs on the stream, each with the subjects and data types it is
     #: kept current for; and the latest message heard for each, not sent yet.
     streams: dict[str, tuple[tuple[str, ...], frozenset[str]]] = field(default_factory=dict)
@@ -285,7 +307,15 @@ class Lake:
     _changed: asyncio.Event = field(init=False)
 
     def __post_init__(self) -> None:
-        self.wants = data.Wants(self.plugin, (DAILY, LIVE), clock_ns=self.clock_ns)
+        self.wants = data.Wants(
+            self.plugin,
+            (DAILY, LIVE),
+            clock_ns=self.clock_ns,
+            latency=self.latency,
+            session=STREAM_SESSION if self.latency is not None else "",
+        )
+        if self.latency is not None:
+            self.latency.session(STREAM_SESSION, "rest")
         self._changed = asyncio.Event()
 
     # ── The connection ───────────────────────────────────────────────────
@@ -315,6 +345,7 @@ class Lake:
         refused or did not answer, which is said and never raised."""
         health = self.session.health
         health.calls += 1
+        started = self.clock_ns()
         try:
             answer = await call(*args)
         except Exception as failed:  # noqa: BLE001 - OANDA's refusal, said, not raised
@@ -323,9 +354,15 @@ class Lake:
             health.last_error = str(failed)[:300]
             if getattr(failed, "status", None) == 429:
                 health.rate_limited += 1
+                if self.latency is not None:
+                    self.latency.count(STREAM_SESSION, rate_limited=1)
             log.warning("OANDA did not answer: %s", failed)
             return None
         health.last_ok_ns = self.clock_ns()
+        if self.latency is not None:
+            # The stream has no ping: its round trip is the REST pricing
+            # calls' (the latency spec, OANDA's convention).
+            self.latency.rtt(STREAM_SESSION, health.last_ok_ns - started)
         return answer
 
     # ── Resolving ────────────────────────────────────────────────────────
@@ -756,6 +793,7 @@ class Lake:
         """Send the latest price heard for each pair on the stream, its raw
         message kept first: at most once a pass, so a pair at most once a
         second."""
+        await self.alive()
         pending, self.pending = self.pending, {}
         connection = self.connection()
         if not pending or connection is None:
@@ -793,11 +831,36 @@ class Lake:
             log.warning("%d quotes and %d prices not recorded: %s",
                         len(quotes), len(prices), refused)  # fmt: skip
 
+    async def alive(self) -> bool:
+        """The stream's sign of life since the last (contract v27; ruling
+        418): the live dataset's liveness at OANDA's time of the latest price
+        or heartbeat, recorded for OANDA's venue once a pass, which confirms
+        every quote in force -- OANDA sends a price only on change. Whether
+        it was recorded; a refusal is said, never raised."""
+        stream = self.stream
+        if stream.state != "open" or stream.alive_ns <= stream.liveness_ns:
+            return False
+        stream.liveness_ns = stream.alive_ns
+        try:
+            await self.wants.liveness(LIVE, stream.alive_ns, self.venue.venue_id)
+        except (meridian.MeridianError, ValueError) as refused:
+            log.warning("the stream's liveness not recorded: %s", refused)
+            return False
+        return True
+
     def heard(self, stated: dict[str, Any], received_ns: int) -> None:
         """One message of the pricing stream: a pair's price kept as its latest,
-        sent by the next pass; a heartbeat counted."""
+        sent by the next pass; a heartbeat counted. Either is the stream's
+        sign of life at OANDA's `time` (contract v27)."""
         self.stream.messages += 1
         self.stream.last_message_ns = received_ns
+        at_ns = moments.ns(stated.get("time"))
+        if at_ns:
+            self.stream.alive_ns = max(self.stream.alive_ns, at_ns)
+        if self.latency is not None:
+            self.latency.alive(STREAM_SESSION, received_ns)
+            if at_ns and stated.get("type") == "HEARTBEAT":
+                self.latency.clock_skew(STREAM_SESSION, at_ns)
         if stated.get("type") == "PRICE":
             instrument = str(stated.get("instrument") or "")
             if instrument in self.streams:
@@ -836,6 +899,7 @@ class Lake:
                     else:
                         self.stream.dropped += 1
                         self.stream.last_error = "OANDA ended the stream"
+                        self._reconnects()
                 finally:
                     close = getattr(lines, "aclose", None)
                     if close is not None:
@@ -843,12 +907,17 @@ class Lake:
             except Exception as failed:  # noqa: BLE001 - said, and opened again
                 self.stream.dropped += 1
                 self.stream.last_error = str(failed)[:300]
+                self._reconnects()
                 log.warning("the pricing stream stopped, opening it again: %s", failed)
             if self._changed.is_set() or self._moved(connection):
                 continue
             self.stream.state = "waiting"
             await sleep(wait)
             wait = min(wait * 2, MOST_WAIT_SECONDS)
+
+    def _reconnects(self) -> None:
+        if self.latency is not None:
+            self.latency.count(STREAM_SESSION, reconnects=1)
 
     # ── Keeping current ──────────────────────────────────────────────────
 
@@ -948,9 +1017,6 @@ def connection_read(
     lake: Lake | None,
     credentials: Sequence[data.Credential],
     mode: str,
-    environment: str = "",
-    reached_environment: str = "",
-    badge: str = "",
 ) -> Any:
     """Connection's record before the data role is held (None) or from its
     work."""
@@ -963,9 +1029,6 @@ def connection_read(
             sessions=0,
             venue=VENUE_NAME,
             entitled_at_vendor=ENTITLED,
-            environment=environment,
-            reached_environment=reached_environment,
-            badge=badge,
         )
     health = lake.session.health
     stream = lake.stream
@@ -994,7 +1057,4 @@ def connection_read(
         stream_messages=stream.messages,
         last_message_at=data.iso_time(stream.last_message_ns),
         stream_error=stream.last_error,
-        environment=environment,
-        reached_environment=reached_environment,
-        badge=badge,
     )

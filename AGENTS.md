@@ -77,7 +77,14 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   charges its financing again on the new placement and catches its lines up
   to OANDA's latest roll. A new
   connection is read-only until an admin of `connectivity` enables trading
-  on it (`enable_trading`, Connections).
+  on it (`enable_trading`, on Connection: from 0.6.0 the SDK's one page for
+  the data role and connectivity, `connectivity.connection_pages`, ruling
+  457, with its Raw records, `raw_records_page`; OANDA's Trader read through
+  `page._Connectivity`). Its catalogue lists direct market access alone
+  (contract v27); the `orders` and `pricing-stream` sessions' latency is
+  recorded on one `meridian.roles.Latency`, never sent until contract v28.
+  The live dataset's liveness is the pricing stream's latest price or
+  heartbeat, at OANDA's time (`Lake.alive`).
 - **Custody** (`custody.py`) reports the account, its sync status, its
   statement and its activity as OANDA states them, each closed value with its
   provenance; activity is each transaction that moved cash, the backfill on

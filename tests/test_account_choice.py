@@ -384,7 +384,7 @@ def test_choose_account_and_its_check() -> None:
     assert read.data["account_id"] == synthetic.ACCOUNT_ID
     assert read.data["account_from"] == "chosen" and read.data["preselected"] == ""
     (connection,) = read.data["connections"]
-    assert connection["trading"] is False
+    assert connection["connection_id"] == f"synthetic:{synthetic.ACCOUNT_ID}"
 
 
 def test_choosing_through_the_form() -> None:
@@ -442,8 +442,9 @@ def test_connections_say_why_a_returned_to_connection_is_read_only() -> None:
             assert made.enable_trading(f"{PRACTICE}:{A}", "Ada Admin")
     back = client.call_tool("choose_account", {"account_id": A}, level="admin")
     assert back.data["trading"] is False and "read-only" in back.data["said"]
-    (connection,) = client.call_tool("read_connections", level="admin").data["connections"]
-    assert connection["trading"] is False
-    assert connection["trading_turned_off"].startswith("Trading was turned off here at ")
-    assert "choose_account by" in connection["trading_turned_off"]
-    assert "Turned off on a switch" in client.get("/admin/connections", "admin").body
+    # From 0.6.0 the connection's trading is Connection's (the SDK's
+    # connectivity sections), with OANDA's word on why it is read-only.
+    read = client.call_tool("read_connection", level="admin").data
+    assert read["trading_turned_off"].startswith("Trading was turned off here at ")
+    assert "choose_account by" in read["trading_turned_off"]
+    assert "Trading was turned off here at" in client.get("/", "admin").body

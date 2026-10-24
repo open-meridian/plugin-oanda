@@ -50,7 +50,7 @@ deployment's accounts. Nothing is recorded for it until it is linked.
 
 A new connection is read-only: every order on it is rejected as
 unsupported. An admin of the connectivity role presses **Enable trading** on
-Connections. The connection is the environment together with the account,
+Connection, beside the account in use. The connection is the environment together with the account,
 so changing either makes a new connection, read-only again; switching away
 also turns trading off on the old one, and returning finds it read-only.
 Each such change is recorded with who made it and when.

@@ -20,7 +20,11 @@ unusable with why. This plugin speaks only OANDA's v20 API.
 
 Trading is not enabled on the connection in use. A new connection, or one
 returned to after a change of account or environment, is read-only until an
-admin of the connectivity role enables it on Connections.
+admin of the connectivity role enables it on Connection.
+
+An order whose placement is a request for quote, or any type but a direct
+placement, is rejected too: OANDA is the counterparty to every order, at
+the price it streams, so it takes no request for quote.
 
 ## An order rejected naming a pair
 
