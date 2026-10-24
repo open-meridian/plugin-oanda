@@ -23,29 +23,6 @@ MOST_ID = 200
 
 
 @dataclass(frozen=True)
-class ConnectionAsked:
-    """Which connection, by the ID Connections and read_connections name it
-    by: its environment and account, `practice:101-001-1234567-001`."""
-
-    connection_id: str = field(
-        default="",
-        metadata={
-            "max_length": MOST_ID,
-            "description": "the connection, as read_connections names it",
-        },
-    )
-
-
-@dataclass(frozen=True)
-class TradingEnabled:
-    """A connection's trading, as it stands after the action."""
-
-    connection_id: str
-    trading: bool
-    said: str
-
-
-@dataclass(frozen=True)
 class AccountAsked:
     """Which of the accounts the token reaches to use, by its v20 ID, as
     read_connections lists it under `reached`."""
@@ -115,8 +92,10 @@ class Linked:
 
 @dataclass(frozen=True)
 class ConnectionRead(custody.ConnectionRead):
-    """The connection, and its trading: read-only until enabled, and how
-    many placements it is working, holding back or asking about."""
+    """The connection: its ID, its environment and the agents' guard's
+    badge. From 0.6.0 its trading -- read-only until enabled, and the
+    placements on it -- is Connection's (`read_connection`, the SDK's
+    connectivity sections)."""
 
     connection_id: str = ""
     environment: str = ""
@@ -126,15 +105,6 @@ class ConnectionRead(custody.ConnectionRead):
     # (environment not confirmed)".
     reached_environment: str = ""
     badge: str = ""
-    trading: bool = False
-    trading_enabled_by: str = ""
-    # Where trading on this connection was last turned off by a switch away
-    # from it, when and why: a person enables it again on returning.
-    trading_turned_off: str = ""
-    working: int = 0
-    held: int = 0
-    unknown: int = 0
-    waiting_for_a_value_date: int = 0
 
 
 @dataclass(frozen=True)
@@ -210,9 +180,12 @@ class LakeConnectionRead(data.VenueConnection):
     fields and OANDA's as the venue (`VenueConnection`), the pricing stream's
     session as `meridian.roles.data.pairs` names it -- "off" while nothing
     stands on it, "connecting", "open", or "waiting" to open again after a
-    drop; the pairs on it, how often it opened and dropped, its messages --
-    and the environment: the setting's ("Practice" or "Live"), the one the
-    session reached (`paper`, `live`), and the badge both make."""
+    drop; the pairs on it, how often it opened and dropped, its messages.
+    From 0.6.0 the environment, the badge and the account's trading are
+    connectivity's sections (`trading`, the SDK's `connection_pages`), and
+    OANDA's nuance beside them: where trading on the connection was last
+    turned off by a switch away from it, when and why (a person enables it
+    again on returning), and how many fills wait for a value date."""
 
     stream_state: str = "off"
     streaming: int = 0
@@ -221,6 +194,5 @@ class LakeConnectionRead(data.VenueConnection):
     stream_messages: int = 0
     last_message_at: str = ""
     stream_error: str = ""
-    environment: str = ""
-    reached_environment: str = ""
-    badge: str = ""
+    trading_turned_off: str = ""
+    waiting_for_a_value_date: int = 0

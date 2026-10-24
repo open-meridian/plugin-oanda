@@ -1,5 +1,80 @@
 # Changelog
 
+## 0.6.0
+
+On SDK 0.32.3 and contract v27, the v27 build's plugin step (plans/the-v27-build
+§C and §G): OANDA is one of the four plugins the latency track is proved on.
+
+- **One Connection for data and connectivity** (ruling 457): Connection (`/`,
+  `read_connection`) is the SDK's page for a plugin holding both
+  (`meridian.roles.connectivity.connection_pages`): the data role's sections
+  beside connectivity's (Environment, Accounts, Placements), the account in
+  use read-only or with trading enabled, and **Enable trading**
+  (`enable_trading`, `/enable-trading`, checked by `check_enable_trading`),
+  now taking the account's `venue_account_code`, OANDA's v20 account ID, in
+  place of 0.5.x's `connection_id`. `read_connection` carries the trading as
+  `trading` (its environment, reached environment and badge there, no longer
+  beside the data role's fields), and OANDA's `trading_turned_off` and
+  `waiting_for_a_value_date`. Connections (`read_connections`) stays
+  custody's: the connection, its badge and the Account section with **Use
+  this account**; its trading fields and act column moved to Connection.
+  OANDA's own copies are gone: its Enable trading routes and records
+  (`ConnectionAsked`, `TradingEnabled`) and its Raw records page.
+- **Raw records** (`/raw`) is the SDK's (`raw_records_page`): each kind and
+  its window, and a row's reference followed to the record as OANDA sent it,
+  shown to a person who may read the account it is linked or mapped to. The
+  list of the latest records kept for the account is gone with OANDA's page.
+- **Connection's tabs** (SDK 0.32.3): one group at a time under a tab row
+  (`?tab=`): Key, Limits and use, Stream, Trading, and Sessions once a
+  session is measured; "Enable trading" answers on the Trading tab, and
+  `read_connection` answers the whole. The SDK sizes the act column, so
+  "Enable trading" is not clipped at 375 and 582 px, and wraps a long raw
+  record within its box. Every page browser-checked at 375, 582 and 1280
+  px: none scrolls sideways, and each fits one screen but Raw records with
+  a long record open, whose box the SDK caps at 24rem.
+- **Liveness** (contract v27, ruling 418): the pricing stream's latest price
+  or heartbeat (OANDA sends one every five seconds, prices only on change)
+  is the live dataset's sign of life, recorded once a pass at OANDA's own
+  `time` for OANDA's venue (`RecordLiveness`); the data suite's
+  `records-a-datasets-liveness` is presented.
+- **No declared delay**: both datasets declare `declared_delay_ns` 0, OANDA's
+  prices being its own and real time. The FX sample's quote age reads a
+  quote's `event` source time (OANDA's `time`, as before) and the liveness
+  after it; it needs nothing more of OANDA's datasets.
+- **Latency, recorded and shown, not reported** (rulings 515, 516 and 518):
+  one `meridian.roles.Latency` for the `pricing-stream` session (its sign of
+  life, clock skew from the heartbeat's time, reconnects, 429s, its round
+  trip as the REST pricing calls' durations) and each streamed row's age at
+  the edge, and the `orders` session (each v20 REST call's round trip, a
+  send's order acknowledgement, a fill's delay, the transaction stream's
+  sign of life). Connection's Sessions shows each once measured. Nothing is
+  sent: `reports-its-feed-delay` and `reports-a-sessions-round-trip` are not
+  presented, "core receives ReportLatency from contract v28, ruling 515".
+- **Placement types** (contract v27, W11.20): the catalogue lists direct
+  market access alone, none while read-only. A placement of another type,
+  a request for quote among them, is rejected `unsupported`, nothing sent;
+  `records-a-dealers-quote-on-an-rfq-placement` is not presented: OANDA is
+  the counterparty to every order.
+- **Trader fixes from SDK 0.32.0**, in OANDA's own Trader: a replace
+  rejected `unsupported` keeps a raw record naming the venue account code
+  and the connection, as a placement's rejection does. Held already, and now
+  tested: a fill is found by every identifier OANDA states (its order ID,
+  or the client extension ID it was sent with, a replace's
+  `<placement>.r<n>` among them), and a good-till-date order's expiry
+  (`expire_date` or `expire_time_ns`, its date's end at OANDA's 17:00 New
+  York) rides on its send and on a replace.
+- **The suites' v27 cases**: the data suite's rates cases not presented
+  (OANDA publishes no fixing, average, index level or curve), and
+  `queries-the-lake-within-bounds` with them, about trades from v27, which
+  OANDA states none of.
+- **Agents trade the Practice account only**: the Environment's Practice
+  default and the demo-only guard's two keys are unchanged.
+- **The pins**: open-meridian 0.32.3 and plugin-python:0.32.3, core v27's
+  runtime and harness (core a5da59a, merged as 6d346b3, chart 0.1.310, by
+  tag and digest), and `meridian` 0.1.52 in `check.yaml`. No `DatasetLicence`
+  sets the attribution fields of 0.32.2 and 0.32.3: core v27 before 0.1.311
+  refuses a declaration that does.
+
 ## 0.5.1
 
 A fix to 0.5.0: an Environment saved before 0.5.0 no longer stops the plugin.

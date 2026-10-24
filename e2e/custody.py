@@ -128,13 +128,17 @@ def run():
         "--post", "/admin/connections/choose-account", "--from-page", "account_id",
         "--expect", f"Using {ACCOUNT}: the connection synthetic:{ACCOUNT}, read-only",
     )
-    # The data role (from 0.5.0): its Connection says the environment and the
-    # agents' guard's badge -- the synthetic OANDA reports paper and the
-    # setting is Practice, so Demo -- and its Datasets its catalogue.
+    # Connection (from 0.6.0 the SDK's one page for the data role and
+    # connectivity, 457) says the environment and the agents' guard's badge
+    # -- the synthetic OANDA reports paper and the setting is Practice, so
+    # Demo -- and, on its Trading tab (SDK 0.32.3), the account in use,
+    # read-only; Datasets its catalogue.
     runner("grant", "--level", "admin", "--role", "data")
-    connection = runner("page", "--level", "admin", "/", "--until", "Agents&#39; orders")
-    must("Practice" in connection and "Demo" in connection,
-         f"the data role's Connection does not say Practice and Demo: {connection[-1500:]}")
+    connection = runner("page", "--level", "admin", "/?tab=trading", "--until", "Placements")
+    must("Practice" in connection and "Demo" in connection and "Read-only" in connection
+         and ACCOUNT in connection,
+         f"Connection does not say Practice, Demo and the account read-only: "
+         f"{connection[-1500:]}")
     runner("page", "--level", "admin", "/datasets", "--until", "oanda:live")
     # 3. Linked through Account links.
     runner("page", "--level", "admin", "/admin/accounts", "--until", ACCOUNT)
@@ -172,8 +176,9 @@ def run():
         ),
         "step 6, no read of the account was kept",
     )
+    # From 0.6.0 the SDK's Raw records, the record shown as received.
     runner("page", "--level", "read", f"/raw?ref={reference}", "--until",
-           "The record a row references")
+           "The record</h2>")
     compose("up", "-d", "--no-deps", "--force-recreate", "oanda")
     runner("ready")
     until(

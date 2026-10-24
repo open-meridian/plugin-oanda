@@ -676,3 +676,148 @@ def test_good_till_date_ends_at_oandas_day_end() -> None:
 
 def test_the_derived_execution_id() -> None:
     assert execution_id("101-001-1-001", "42") == "101-001-1-001:42"
+
+
+# ── Contract v27 ────────────────────────────────────────────────────────────
+
+
+def test_the_catalogue_lists_direct_market_access_alone_and_none_read_only() -> None:
+    """OANDA's placement types (W11.20): direct market access alone, no
+    request for quote; none while the connection is read-only."""
+    enabled, read_only = Recorder("oanda"), Recorder("oanda")
+
+    async def work() -> None:
+        await TradeRig(enabled).started()
+        await TradeRig(read_only, trading=False).started()
+
+    run(work())
+    (catalogue,) = enabled.on("ReportVenueCatalogue")
+    assert [ops.PlacementType.Name(t) for t in catalogue.catalogue.placement_types] == [
+        "PLACEMENT_TYPE_DMA"
+    ]
+    (none,) = read_only.on("ReportVenueCatalogue")
+    assert list(none.catalogue.placement_types) == []
+
+
+def test_a_request_for_quote_is_rejected_unsupported_and_nothing_sent() -> None:
+    recorder = Recorder("oanda")
+
+    async def work() -> None:
+        rig = TradeRig(recorder)
+        await rig.started()
+        held = placement()
+        held.placement_type = ops.PLACEMENT_TYPE_RFQ
+        rig.holds(held)
+        await rig.hear(held)
+        assert rig.venue.orders() == []
+        (said,) = recorder.on("ReportPlacement")
+        assert said.rejection_reason == ops.REJECTION_REASON_UNSUPPORTED
+        record = rig.raw.find(said.raw_record.key.rsplit("/", 1)[0])
+        assert record is not None
+        assert "no request for quote" in json.dumps(record.document)
+        assert "PLACEMENT_TYPE_DMA" in json.dumps(record.document)
+
+    run(work())
+
+
+def test_a_replace_rejected_unsupported_names_the_venue_account() -> None:
+    """As SDK 0.32.0's Trader: the rejected replace's raw record names the
+    venue account and the connection, as a placement's rejection does."""
+    recorder = Recorder("oanda")
+
+    async def work() -> None:
+        rig = TradeRig(recorder)
+        await rig.started()
+        held = placement(quantity=f"{synthetic.WORKS}")
+        rig.holds(held)
+        await rig.hear(held)
+        working = placement(
+            quantity=f"{synthetic.WORKS}",
+            state=ops.PLACEMENT_STATE_WORKING,
+            venue_order_id=rig.venue.orders()[0]["id"],
+        )
+        odd = asking(
+            working,
+            ops.PLACEMENT_CHANGE_KIND_REPLACE,
+            time_in_force=ops.TIME_IN_FORCE_AT_THE_OPEN,
+        )
+        rig.holds(odd)
+        await rig.hear(odd)
+        rejected = recorder.on("ReportPlacement")[-1]
+        assert rejected.rejection_reason == ops.REJECTION_REASON_UNSUPPORTED
+        record = rig.raw.find(rejected.raw_record.key.rsplit("/", 1)[0])
+        assert record is not None
+        stated = json.dumps(record.document)
+        assert f'"venue_account_code": "{ACCOUNT}"' in stated
+        assert f'"connection": "synthetic:{ACCOUNT}"' in stated
+
+    run(work())
+
+
+def test_a_good_till_date_replace_keeps_its_expiry() -> None:
+    async def work() -> None:
+        rig = TradeRig(Recorder("oanda"))
+        await rig.started()
+        held = placement(quantity=f"{synthetic.WORKS}", tif=ops.TIME_IN_FORCE_GOOD_TILL_DATE)
+        rig.holds(held, expire_date="2026-10-30")
+        await rig.hear(held)
+        working = placement(
+            quantity=f"{synthetic.WORKS}",
+            tif=ops.TIME_IN_FORCE_GOOD_TILL_DATE,
+            state=ops.PLACEMENT_STATE_WORKING,
+            venue_order_id=rig.venue.orders()[0]["id"],
+        )
+        replace = asking(
+            working, ops.PLACEMENT_CHANGE_KIND_REPLACE, limit_price=money("1.07500")
+        )
+        rig.holds(replace, expire_date="2026-10-30")
+        await rig.hear(replace)
+        replaced = rig.venue.orders()[1]
+        assert replaced["timeInForce"] == "GTD"
+        assert replaced["gtdTime"] == "2026-10-30T21:00:00.000000000Z"
+
+    run(work())
+
+
+def test_a_fill_is_found_by_its_client_id_after_a_replace() -> None:
+    """Every identifier OANDA states for a fill finds its placement: the
+    order's ID, or the client extension ID it was sent with, a replace's
+    `<placement>.r<n>` among them."""
+    recorder = Recorder("oanda")
+
+    async def work() -> None:
+        rig = TradeRig(recorder)
+        await rig.started()
+        held = placement(quantity=f"{synthetic.WORKS}")
+        rig.holds(held)
+        await rig.hear(held)
+        worked = rig.trader.working[held.placement_id]
+        assert rig.trader._by_order("", held.placement_id) is worked
+        assert rig.trader._by_order(worked.oanda_order_id, "") is worked
+        worked.replaced = 1
+        assert rig.trader._by_order("", f"{held.placement_id}.r1") is worked
+        assert rig.trader._by_order("", f"{held.placement_id}.r2") is None
+
+    run(work())
+
+
+def test_the_order_calls_latency_is_recorded_on_the_orders_session() -> None:
+    """Contract v27: each v20 REST call its round trip, a send's answer its
+    order acknowledgement -- recorded, not yet reported (ruling 515)."""
+    from meridian.roles import Latency
+
+    recorder = Recorder("oanda")
+    latency = Latency(recorder)
+
+    async def work() -> None:
+        rig = TradeRig(recorder, latency=latency)
+        await rig.started()
+        held = placement(quantity=f"{synthetic.WORKS}")
+        rig.holds(held)
+        await rig.hear(held)
+
+    run(work())
+    (orders,) = latency.session_latency()
+    assert orders.session == "orders" and orders.transport == "rest"
+    assert orders.rtt.p99_ns > 0 and orders.order_ack.p99_ns > 0
+    assert recorder.on("ReportLatency") == []

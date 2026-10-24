@@ -17,12 +17,18 @@ named in `NOT_PRESENTED` with why:
   trades: OANDA makes the prices it quotes, and states no trades;
 - calendars and settlement dates: a price needs neither (the connectivity
   role reads them for a fill's value date, which its own suite holds);
-- outcomes: OANDA lists no event contract.
+- outcomes: OANDA lists no event contract;
+- rates (contract v27): OANDA quotes currency pairs, and publishes no
+  fixing, average, index level or curve;
+- latency (ruling 518): `reports-its-feed-delay` waits for core to receive
+  ReportLatency, from contract v28 (ruling 515); the feed delay is recorded
+  all the same.
 
-`queries-the-lake-within-bounds` is mapped as the SDK's data template maps
-it (`lake_query`): the plugin itself asks the lake nothing. The three cases
-the SDK answers (a replacement, the template catalogue, an event group) are
-its.
+`queries-the-lake-within-bounds` is about trades from contract v27, so it is
+not presented with them. `records-a-datasets-liveness` is OANDA's own: the
+pricing stream's heartbeat, with no price changed, recorded as the live
+dataset's liveness at OANDA's time. The three cases the SDK answers (a
+replacement, the template catalogue, an event group) are its.
 """
 
 from __future__ import annotations
@@ -36,7 +42,6 @@ from pathlib import Path
 
 from meridian.operations import as_decimal, as_money
 from meridian.plugin.v1 import operations_pb2 as ops
-from meridian.roles.data.testing import lake_query
 from meridian.suites import Recorder, run, suite
 
 from oanda import moments
@@ -55,6 +60,10 @@ NEVER = {
     "settlement dates": "a price needs no settlement date: recorded as OANDA states it",
     "outcomes": "OANDA lists no event contract",
     "disputed outcomes": "OANDA lists no event contract",
+    "rates": (
+        "OANDA quotes currency pairs: it publishes no fixing, average, index level or curve"
+    ),
+    "latency": "core receives ReportLatency from contract v28, ruling 515",
 }
 NOT_PRESENTED: dict[str, str] = {
     case.name: NEVER[case.about] for case in suite("data").cases if case.about in NEVER
@@ -137,6 +146,22 @@ def producers(root: Path) -> dict[str, Producer]:
         )
         await rig.lake.flush()
 
+    async def heartbeat(lake: Recorder) -> None:
+        # The pricing stream open on a pair kept current: a heartbeat and no
+        # price changed, the live dataset's liveness at OANDA's time.
+        rig = LakeRig(lake, storage=fresh())
+        lake.answer(
+            "ObservationsWanted",
+            lambda _: [want("WNT-9", "live", [EUR], data_type=QUOTE, standing=True)],
+        )
+        await lake.receive(observations_wanted=rig.lake.on_want)
+        rig.lake.stream.state = "open"
+        rig.lake.heard(
+            {"type": "HEARTBEAT", "time": "2026-10-13T15:00:05.000000000Z"},
+            rig.lake.clock_ns(),
+        )
+        await rig.lake.flush()
+
     async def withdrawn(lake: Recorder) -> None:
         rig = LakeRig(lake, storage=fresh())
         lake.answer(
@@ -172,7 +197,7 @@ def producers(root: Path) -> dict[str, Producer]:
         "a-quote-recorded": wanted(quotes),
         "a-one-sided-quote": one_sided,
         "reads-its-datasets-licences": licences,
-        "queries-the-lake-within-bounds": lake_query(EUR, "quotes"),
+        "records-a-datasets-liveness": heartbeat,
     }
 
 
@@ -349,3 +374,62 @@ def test_the_pricing_stream_keeps_a_standing_want_current() -> None:
     assert streamed, "quotes recorded from the stream"
     keys = {q.meta.raw.key for batch in streamed for q in batch.quotes}
     assert all("/stream/" in key and ".jsonl#" in key for key in keys)
+
+
+# ── Liveness and latency (contract v27) ─────────────────────────────────────
+
+
+def test_a_heartbeat_is_the_live_datasets_liveness_at_oandas_time_once() -> None:
+    """OANDA's pricing stream sends a price only on change, and a heartbeat
+    every five seconds: the latest is the live dataset's sign of life,
+    recorded once a pass at OANDA's own time for OANDA's venue (ruling
+    418), never while the stream is not open, never twice for one message."""
+    recorder = Recorder(INSTANCE)
+    rig = LakeRig(recorder)
+
+    async def work() -> None:
+        heartbeat = {"type": "HEARTBEAT", "time": "2026-10-13T15:00:05.000000000Z"}
+        rig.lake.heard(heartbeat, rig.lake.clock_ns())
+        await rig.lake.flush()
+        assert recorder.on("RecordLiveness") == [], "not while the stream is not open"
+        rig.lake.stream.state = "open"
+        await rig.lake.flush()
+        await rig.lake.flush()
+
+    asyncio.run(work())
+    (recorded,) = recorder.on("RecordLiveness")
+    (item,) = recorded.liveness
+    assert item.dataset == f"{INSTANCE}:live"
+    assert item.alive_at_ns == moments.ns("2026-10-13T15:00:05.000000000Z")
+    assert item.venue_id == rig.lake.venue.venue_id
+
+
+def test_the_pricing_streams_session_and_feed_delay_are_recorded_not_reported() -> None:
+    """The stream's session (`pricing-stream`, REST for its round trip, the
+    stream having no ping): each pricing call's duration, the heartbeat's
+    sign of life and clock skew, and each streamed row's age at the edge --
+    recorded, never sent until core receives ReportLatency (ruling 515)."""
+    from meridian.roles import Latency
+
+    recorder = Recorder(INSTANCE)
+    rig = LakeRig(recorder)
+    latency = Latency(recorder, clock_ns=rig.lake.clock_ns)
+    rig.lake = type(rig.lake)(
+        recorder,
+        rig.connections,
+        rig.lake.pairs,
+        rig.lake.raw,
+        clock_ns=rig.lake.clock_ns,
+        latency=latency,
+    )
+    run_want(rig, want("WNT-1", "live", [EUR], data_type=QUOTE, standing=True))
+    rig.lake.stream.state = "open"
+    rig.lake.heard(
+        {"type": "HEARTBEAT", "time": "2026-10-13T15:00:00.000000000Z"}, rig.lake.clock_ns()
+    )
+    asyncio.run(rig.lake.flush())
+    asyncio.run(latency.report())
+    (stream,) = latency.session_latency()
+    assert stream.session == "pricing-stream" and stream.transport == "rest"
+    assert stream.alive_at_ns == rig.lake.clock_ns()
+    assert recorder.on("ReportLatency") == []

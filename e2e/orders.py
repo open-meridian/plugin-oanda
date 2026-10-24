@@ -52,7 +52,6 @@ from zoneinfo import ZoneInfo
 COMPOSE = sys.argv[1:]
 LOG = ".e2e/orders.log"
 CODE = "101-001-0000000-001"
-CONNECTION = f"synthetic:{CODE}"
 WORKS = "1000000"
 # EUR's cash instrument as `store book` prints it: the platform's record by
 # its INS- ID (contract v24's one-ID model), the harness's published format.
@@ -240,8 +239,10 @@ def run():
            "--user", "person:local|harness")
     mapped = desk("admin", f"/map?account={account}&code={CODE}")
     must(mapped == {"mapped": CODE}, f"step 1, mapped: {mapped}")
-    runner("form", "--instance", "oanda", "--level", "admin", "--page", "/admin/connections",
-           "--post", "/admin/connections/enable-trading", f"connection_id={CONNECTION}",
+    # From 0.6.0 on Connection, the SDK's one page for the data role and
+    # connectivity (457), its Trading tab, by the account's venue account code.
+    runner("form", "--instance", "oanda", "--level", "admin", "--page", "/?tab=trading",
+           "--post", "/enable-trading", f"venue_account_code={CODE}",
            "--expect", "Trading enabled on")
     runner("attribute", account, "waits=false", "note=No compliance plugin in this run.")
 

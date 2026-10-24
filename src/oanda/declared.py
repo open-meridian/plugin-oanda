@@ -31,6 +31,10 @@ catalogue"), of the lake's existing kinds, prices and quotes:
   ending at 17:00 New York (`day_time_zone` America/New_York,
   `day_end_minute` 1020), OANDA's default alignment; pulled; kept.
 
+Each declares no delay (`declared_delay_ns` 0, contract v27): OANDA serves
+its own prices in real time, the quotes it trades at, so each is judged
+against the staleness ceiling alone, never a delay beside it.
+
 Neither names a venue in the catalogue: each row names OANDA, the venue
 master's record for it (lake.py). Each licence is the default a
 deployment's licence confirms or replaces, never a statement of what
@@ -81,6 +85,9 @@ DAY_TIME_ZONE = "America/New_York"
 DAY_END_MINUTE = 17 * 60
 #: How long the live dataset's rows are kept by its default terms: a quarter.
 LIVE_RETENTION_DAYS = 90
+#: How far behind real time OANDA serves its prices (contract v27): not at
+#: all -- they are its own, the prices it trades at.
+DECLARED_DELAY_NS = 0
 #: OANDA as the venue master knows it (W3.14), by its own name.
 VENUE_NAME = "OANDA"
 VENUE_IDENTIFIERS: tuple[tuple[str, str, str], ...] = (("symbol", "oanda", "oanda"),)
@@ -98,6 +105,7 @@ CATALOGUE = [
         ),
         day_time_zone=DAY_TIME_ZONE,
         day_end_minute=DAY_END_MINUTE,
+        declared_delay_ns=DECLARED_DELAY_NS,
     ),
     DatasetDeclaration(
         key=DAILY,
@@ -109,6 +117,7 @@ CATALOGUE = [
         licence_default=DatasetLicence(kept=True, derived_use=True, display=True),
         day_time_zone=DAY_TIME_ZONE,
         day_end_minute=DAY_END_MINUTE,
+        declared_delay_ns=DECLARED_DELAY_NS,
     ),
 ]
 

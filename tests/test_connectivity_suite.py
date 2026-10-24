@@ -72,6 +72,15 @@ NOT_PRESENTED = {
         "it places what its ems released; whether releases wait for compliance changes "
         "nothing it sends"
     ),
+    # Contract v27.
+    "records-a-dealers-quote-on-an-rfq-placement": (
+        "OANDA takes no request for quote: it is the counterparty to every order, at the "
+        "price it streams, so its catalogue lists direct market access alone"
+    ),
+    # Ruling 518: about `latency`, not presented until core receives it.
+    "reports-a-sessions-round-trip": (
+        "core receives ReportLatency from contract v28, ruling 515"
+    ),
 }
 
 

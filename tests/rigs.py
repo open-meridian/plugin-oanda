@@ -202,8 +202,10 @@ class TradeRig:
         trading: bool = True,
         dates: Callable[[Any], ops.ComputeDateResult] = spot_of,
         storage: Path | None = None,
+        latency: Any = None,
     ) -> None:
         self.recorder = recorder
+        self.latency = latency
         self.clock = Clock(NOW)
         self.storage = storage or Path(tempfile.mkdtemp())
         self.venue = SyntheticOanda(self.clock, synthetic.state_file(self.storage))
@@ -258,6 +260,7 @@ class TradeRig:
             trades=self.kept["trades"],
             waiting=self.kept["waiting"],
             rolling=self.kept["rolling"],
+            latency=self.latency,
         )
 
     def _instrument(self, params: ops.ResolveInstrumentParams) -> ops.ResolveInstrumentResult:

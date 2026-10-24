@@ -125,11 +125,24 @@ what OANDA's order endpoint takes for its account (ReportVenueCatalogue):
 market (FOK, IOC), limit and stop (GTC, GTD, day as OANDA's GFD, FOK, IOC),
 none while the connection is read-only; never a strategy (OANDA has no
 algorithms); and no execution acknowledgement
-(`EXECUTION_ACKNOWLEDGEMENT_NONE`): OANDA's v20 API takes none. From 0.5.0
+(`EXECUTION_ACKNOWLEDGEMENT_NONE`): OANDA's v20 API takes none. From 0.6.0
+(contract v27, W11.20) its placement types: direct market access alone
+(`PLACEMENT_TYPE_DMA`), none while read-only. OANDA is the counterparty to
+every order, at the price it streams, so it takes no request for quote, no
+algorithm, no care order and no manual one; a placement of another type is
+rejected `unsupported`, nothing sent. From 0.5.0
 (contract v26) it carries the environment the session reached, read from
 OANDA's host (`paper` for api-fxpractice, `live` for api-fxtrade; venue.py),
 the second key of the agents' demo-only guard, published again whenever it
 changes.
+
+**Its session's latency** (from 0.6.0; contract v27, the `orders` session,
+REST): each call to OANDA's v20 REST its round trip, a send to OANDA's
+answer its order acknowledgement, a fill's OANDA time to its reading its
+fill delay, and the transaction stream's messages and heartbeats its sign
+of life -- recorded on the plugin's `meridian.roles.Latency`, shown on
+Connection's Sessions, not yet reported: core receives ReportLatency from
+contract v28 (ruling 515).
 
 **Tests and `make e2e` trade only with the synthetic OANDA**
 (synthetic.py). Never OANDA's practice or live hosts.
@@ -140,11 +153,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable, Sequence
+import time as clock
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, TypeVar
 
 import meridian
 from meridian.operations import as_decimal
@@ -159,6 +173,17 @@ from .raw import CANCEL, OFFERED, ORDER, PLACE, REPLACE, STREAMED, RawStore, cal
 from .venue import Json, VenueError, as_json
 
 log = logging.getLogger("oanda.trading")
+
+T = TypeVar("T")
+
+#: The session OANDA's v20 REST calls make, as its latency names it
+#: (contract v27): the SDK's Trader's name for a venue's order calls.
+SESSION = "orders"
+
+#: The placement types OANDA takes (contract v27, W11.20): direct market
+#: access alone -- OANDA is the counterparty to every order, at the price it
+#: streams, so no request for quote, no algorithm, care or manual order.
+PLACEMENT_TYPES: tuple[int, ...] = (ops.PLACEMENT_TYPE_DMA,)
 
 POLL_SECONDS = 5
 SYNTHETIC_POLL_SECONDS = 1
@@ -366,8 +391,15 @@ class Trader:
         waiting: Kept | None = None,
         rolling: Kept | None = None,
         scope: Callable[[], meridian.AccountScope] = meridian.AccountScope,
+        latency: Any = None,
     ) -> None:
         self._plugin = plugin
+        #: The plugin's `meridian.roles.Latency`, where it keeps one (contract
+        #: v27): the `orders` session's round trips, order acknowledgements,
+        #: fill delays and sign of life.
+        self.latency = latency
+        if latency is not None:
+            latency.session(SESSION, "rest")
         self._connection = connection
         self._now = now
         self._pairs = pairs
@@ -393,7 +425,9 @@ class Trader:
         self.decided: set[str] = set()
         self.outside: set[str] = set()
         self.watermark: ops.Watermark | None = None
-        self.published: dict[str, tuple[tuple[tuple[int, tuple[int, ...]], ...], str]] = {}
+        self.published: dict[
+            str, tuple[tuple[tuple[int, tuple[int, ...]], ...], str, tuple[int, ...]]
+        ] = {}
         # Whether placements and instructions heard before start are left to
         # start's own reads (`waits_to_start`, set where the plugin hears them
         # on a stream opened before there is a connection), and whether it
@@ -410,6 +444,28 @@ class Trader:
         # The account's currency, in which OANDA states fees, financing and
         # profit: read from the account on start.
         self.home = "USD"
+
+    # ── Latency (contract v27) ──────────────────────────────────────────
+
+    async def _timed(self, call: Awaitable[T], ack: bool = False) -> T:
+        """One call to OANDA's v20 REST, its duration the `orders` session's
+        round trip, and with `ack` a send's order acknowledgement too (OANDA's
+        answer is its acknowledgement); a 429 counted rate-limited."""
+        started = clock.perf_counter_ns()
+        try:
+            answered = await call
+        except VenueError as failure:
+            if self.latency is not None:
+                self.latency.rtt(SESSION, clock.perf_counter_ns() - started)
+                if failure.status == 429:
+                    self.latency.count(SESSION, rate_limited=1)
+            raise
+        if self.latency is not None:
+            took = clock.perf_counter_ns() - started
+            self.latency.rtt(SESSION, took)
+            if ack:
+                self.latency.order_ack(SESSION, took)
+        return answered
 
     # ── Reading the book ────────────────────────────────────────────────
 
@@ -429,7 +485,7 @@ class Trader:
         if connection is None:
             return
         try:
-            held = await connection.venue.account(connection.account_id)
+            held = await self._timed(connection.venue.account(connection.account_id))
         except VenueError as failure:
             log.warning("the account's currency was not read: %s", failure)
             return
@@ -617,7 +673,9 @@ class Trader:
         if connection is None:
             return
         try:
-            self._pairs.take(await connection.venue.instruments(connection.account_id))
+            self._pairs.take(
+                await self._timed(connection.venue.instruments(connection.account_id))
+            )
         except VenueError as failure:
             log.warning("the pair map was not read again: %s", failure)
 
@@ -737,7 +795,9 @@ class Trader:
         self._sent.note(pid)
         self.working[pid] = worked
         try:
-            answer = await connection.venue.place(connection.account_id, body)
+            answer = await self._timed(
+                connection.venue.place(connection.account_id, body), ack=True
+            )
         except VenueError as failure:
             raw = self._keep(
                 connection,
@@ -761,6 +821,12 @@ class Trader:
             )
         if not connection.trading:
             return "trading is not enabled on this connection: it is read-only", None
+        if (placement.placement_type or ops.PLACEMENT_TYPE_DMA) not in PLACEMENT_TYPES:
+            return (
+                "OANDA's catalogue lists no such placement type: it takes direct market "
+                "access alone, and no request for quote",
+                None,
+            )
         if placement.HasField("strategy") and placement.strategy.kind:
             return "OANDA works no strategy: it has no broker algorithms", None
         if order.side not in (ops.SIDE_BUY, ops.SIDE_SELL):
@@ -947,6 +1013,9 @@ class Trader:
                 }
                 for t, tifs in self.catalogue(connection)
             ],
+            "placement_types": [
+                ops.PlacementType.Name(t) for t in self.placement_types(connection)
+            ],
         }
         raw = self._keep(connection, [call(OFFERED, stated, why)], "offered")
         log.info("rejected %s unsupported: %s", placement.placement_id, why)
@@ -989,7 +1058,7 @@ class Trader:
         was answered with no create transaction: its order, by client ID."""
         specifier = f"@{worked.placement_id}"
         try:
-            answer = await connection.venue.order(connection.account_id, specifier)
+            answer = await self._timed(connection.venue.order(connection.account_id, specifier))
         except VenueError as failure:
             if failure.status == 404:
                 self._once(
@@ -1061,7 +1130,9 @@ class Trader:
             return
         worked.cancel_sent = True
         try:
-            answer = await connection.venue.cancel(connection.account_id, worked.oanda_order_id)
+            answer = await self._timed(
+                connection.venue.cancel(connection.account_id, worked.oanda_order_id)
+            )
         except VenueError as failure:
             raw = self._keep(
                 connection,
@@ -1116,7 +1187,14 @@ class Trader:
         elif quantity <= worked.filled:
             why = "the new quantity is no more than what is filled"
         if why:
-            raw = self._keep(connection, [call(OFFERED, {"why": why}, why)], "offered")
+            # Its raw record names the venue account and the connection, as a
+            # placement's rejection does (0.6.0, as SDK 0.32.0's Trader).
+            stated: Json = {
+                "why": why,
+                "venue_account_code": worked.code,
+                "connection": connection.connection_id,
+            }
+            raw = self._keep(connection, [call(OFFERED, stated, why)], "offered")
             log.info("%s: the replace was rejected unsupported: %s", worked.placement_id, why)
             await self._plugin.report_placement(
                 placement_id=worked.placement_id,
@@ -1136,8 +1214,8 @@ class Trader:
             tif=tif,
         )
         try:
-            answer = await connection.venue.replace(
-                connection.account_id, worked.oanda_order_id, body
+            answer = await self._timed(
+                connection.venue.replace(connection.account_id, worked.oanda_order_id, body)
             )
         except VenueError as failure:
             raw = self._keep(
@@ -1206,7 +1284,9 @@ class Trader:
             return
         _, quantity, limit, client_id = worked.replacing
         try:
-            answer = await connection.venue.order(connection.account_id, f"@{client_id}")
+            answer = await self._timed(
+                connection.venue.order(connection.account_id, f"@{client_id}")
+            )
         except VenueError:
             return
         held = as_json(answer.get("order"))
@@ -1261,11 +1341,13 @@ class Trader:
             if not since:
                 # First start on this account: what came before is no
                 # placement's; taken from here on.
-                held = await connection.venue.account(account)
+                held = await self._timed(connection.venue.account(account))
                 self._cursor.value[account] = str(held.get("lastTransactionID") or "0")
                 self._cursor.save()
                 return
-            transactions, _ = await connection.venue.transactions_since(account, since)
+            transactions, _ = await self._timed(
+                connection.venue.transactions_since(account, since)
+            )
         except VenueError as failure:
             self.shown.error = str(failure)
             log.warning("transactions not read: %s", failure)
@@ -1370,6 +1452,11 @@ class Trader:
             )
             return False
         raw = self._keep(connection, [call(STREAMED, fill, transaction_id)], "fill")
+        if self.latency is not None and not retried:
+            # OANDA's time of the fill to its reading here (contract v27).
+            delay = moments.of(self._now()) - at_ns
+            if delay > 0:
+                self.latency.fill_delay(SESSION, delay)
         done = await self._plugin.report_execution(
             placement_id=worked.placement_id,
             venue_account_code=worked.code,
@@ -1913,6 +2000,12 @@ class Trader:
             return ()
         return tuple((kind, OFFERED_TIMES[kind]) for kind in ORDER_TYPES)
 
+    @staticmethod
+    def placement_types(connection: Connection) -> tuple[int, ...]:
+        """The placement types OANDA takes on the account (contract v27,
+        W11.20): direct market access alone; none while read-only."""
+        return PLACEMENT_TYPES if connection.trading else ()
+
     async def publish(self) -> None:
         """The account's catalogue, where it changed since last published."""
         connection = self._connection()
@@ -1920,7 +2013,8 @@ class Trader:
             return
         offered = self.catalogue(connection)
         environment = connection.venue.environment
-        if self.published.get(connection.code) == (offered, environment):
+        types = self.placement_types(connection)
+        if self.published.get(connection.code) == (offered, environment, types):
             return
         stated_at = moments.of(self._now())
         await self._plugin.report_venue_catalogue(
@@ -1937,9 +2031,11 @@ class Trader:
                 execution_acknowledgement=ops.EXECUTION_ACKNOWLEDGEMENT_NONE,
                 # The environment the session reached (contract v26, W11.20).
                 environment=environment,
+                # The placement types it takes (contract v27, W11.20).
+                placement_types=[ops.PlacementType.Name(t) for t in types],
             )
         )
-        self.published[connection.code] = (offered, environment)
+        self.published[connection.code] = (offered, environment, types)
 
     # ── Raw records ─────────────────────────────────────────────────────
 
@@ -1976,6 +2072,10 @@ class Trader:
                 continue
             try:
                 async for heard in connection.venue.stream(connection.account_id):
+                    if self.latency is not None:
+                        # A transaction or a heartbeat: the session's sign of
+                        # life (contract v27).
+                        self.latency.alive(SESSION)
                     if heard.get("type") == "HEARTBEAT":
                         continue
                     async with self._lock:
