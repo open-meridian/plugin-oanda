@@ -3,18 +3,14 @@
     the data role's sections for a venue listing pairs
     (meridian/roles/data/pairs/connection.html: the mode, the token set or
     not, OANDA's limits and calls, the venue, the pricing stream, each
-    session's latency) beside connectivity's (the environment and the agents'
+    session's latency) and connectivity's, from SDK 0.32.3 one group at a
+    time under a tab row (the environment and the agents'
     guard's badge, the account in use read-only or with trading enabled and
     "Enable trading", the placements) -- and OANDA's nuance at its notices
     only: no account in use yet, trading turned off by a switch of account,
     fills waiting for a value date. No price, no account's data. -#}
 {% extends "meridian/roles/data/pairs/connection.html" %}
 {% block vendor_notices %}
-{#- The act column a fixed 10rem (0.5.0's Connections had 9rem), so
-    "Enable trading" is not clipped at 375 and 582 px: the SDK's
-    connectivity sections (0.32.2) leave it an equal share of a
-    fixed-layout table. Goes once the SDK sizes it. -#}
-<style>table.one-line:has(td > form.inline) thead th:last-child { width: 10rem; }</style>
 {% if data.trading and not data.trading.accounts and data.mode != "No key" %}<div class="notice warn" role="status">No account in use yet: choose it on <a href="{{ paths.connections }}">Connections</a>. Nothing is read or traded until an admin does.</div>{% endif %}
 {% if data.trading_turned_off %}<p class="hint">{{ data.trading_turned_off }} Enable it again below.</p>{% endif %}
 {% if data.waiting_for_a_value_date %}<p class="hint">{{ data.waiting_for_a_value_date }} {{ "fill or roll waits" if data.waiting_for_a_value_date == 1 else "fills or rolls wait" }} for a value date: asked of the date read again each poll, never guessed.</p>{% endif %}

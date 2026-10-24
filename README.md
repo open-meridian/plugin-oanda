@@ -20,8 +20,8 @@ for an Open Meridian deployment. The plugin holds three roles:
   OANDA's daily candle, on its day ending at 17:00 New York (ruled
   2026-10-13: "later, in the same repository").
 
-Version 0.6.0 (not released) is built on open-meridian 0.32.2, contract v27:
-one Connection for its data and connectivity roles, the SDK's (ruling 457),
+Version 0.6.0 (not released) is built on open-meridian 0.32.3, contract v27:
+one Connection for its data and connectivity roles, the SDK's, tabbed (ruling 457),
 with its Raw records; the live dataset's liveness from the pricing stream's
 heartbeats and no declared delay; each session's latency, recorded and
 shown, not yet reported (core receives it from contract v28); and its

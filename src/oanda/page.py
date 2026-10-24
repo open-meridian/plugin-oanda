@@ -9,7 +9,9 @@ own only in its blocks.
   (`meridian.roles.connectivity.connection_pages`, 457), for an admin of
   either: the data role's sections -- the mode, the token set or not (never
   its value), OANDA's limits and the calls made, the venue, the pricing
-  stream, and each session's latency -- beside connectivity's: the
+  stream, and each session's latency -- and connectivity's, from SDK 0.32.3
+  one group at a time under a tab row (`?tab=`: Key, Limits and use,
+  Stream, Trading, Sessions once measured), so it fits one screen: the
   environment and the agents' guard's badge, the account in use read-only
   or with trading enabled, and the placements working, held back or asked
   about. "Enable trading" (`enable_trading`, `/enable-trading`, checked by
@@ -1052,5 +1054,4 @@ connectivity_role.raw_records_page(
     _state,
     kinds=list(KINDS),
     why="a raw record is followed from a row's reference, and read as received",
-    template="raw.html",
 )

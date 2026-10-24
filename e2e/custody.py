@@ -131,9 +131,10 @@ def run():
     # Connection (from 0.6.0 the SDK's one page for the data role and
     # connectivity, 457) says the environment and the agents' guard's badge
     # -- the synthetic OANDA reports paper and the setting is Practice, so
-    # Demo -- and the account in use, read-only; Datasets its catalogue.
+    # Demo -- and, on its Trading tab (SDK 0.32.3), the account in use,
+    # read-only; Datasets its catalogue.
     runner("grant", "--level", "admin", "--role", "data")
-    connection = runner("page", "--level", "admin", "/", "--until", "Placements")
+    connection = runner("page", "--level", "admin", "/?tab=trading", "--until", "Placements")
     must("Practice" in connection and "Demo" in connection and "Read-only" in connection
          and ACCOUNT in connection,
          f"Connection does not say Practice, Demo and the account read-only: "

@@ -8,7 +8,8 @@ you hold on it: **Manage** (admin), **Open** (write) or **View** (read).
 One page for the data and connectivity roles, the same on every plugin
 holding both, under Manage for an admin of either. It shows no price and no
 account's data, and is also a tool an agent can call (`read_connection`).
-Beside each other where the screen is wide enough:
+One group at a time, under a row of tabs: Key, Limits and use, Stream,
+Trading, and Sessions once a session is measured.
 
 - **Key, Limits and use, Stream**: the mode (Practice, Live, Sample data or
   No key); whether the access token is set, never its value; OANDA's limits
@@ -17,7 +18,7 @@ Beside each other where the screen is wide enough:
   messages.
 - **Sessions**: each session's latency, once measured: the pricing
   stream's and the order calls'.
-- **Environment, Accounts, Placements**: the environment and its badge,
+- **Trading** (Environment, Accounts, Placements): the environment and its badge,
   **Demo** only while the setting says Practice and the session reached
   OANDA's practice host; the account in use, read-only or with trading
   enabled, with **Enable trading** for an admin of the connectivity role (a

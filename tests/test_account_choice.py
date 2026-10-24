@@ -447,4 +447,4 @@ def test_connections_say_why_a_returned_to_connection_is_read_only() -> None:
     read = client.call_tool("read_connection", level="admin").data
     assert read["trading_turned_off"].startswith("Trading was turned off here at ")
     assert "choose_account by" in read["trading_turned_off"]
-    assert "Trading was turned off here at" in client.get("/", "admin").body
+    assert "Trading was turned off here at" in client.get("/", "admin", tab="trading").body

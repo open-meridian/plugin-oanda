@@ -2,7 +2,7 @@
 
 ## 0.6.0
 
-On SDK 0.32.2 and contract v27, the v27 build's plugin step (plans/the-v27-build
+On SDK 0.32.3 and contract v27, the v27 build's plugin step (plans/the-v27-build
 §C and §G): OANDA is one of the four plugins the latency track is proved on.
 
 - **One Connection for data and connectivity** (ruling 457): Connection (`/`,
@@ -24,12 +24,14 @@ On SDK 0.32.2 and contract v27, the v27 build's plugin step (plans/the-v27-build
   its window, and a row's reference followed to the record as OANDA sent it,
   shown to a person who may read the account it is linked or mapped to. The
   list of the latest records kept for the account is gone with OANDA's page.
-- **"Enable trading" is not clipped** at 375 and 582 px: the SDK's sections
-  give the act column an equal share of a fixed-layout table, so OANDA's
-  Connection fixes it at 10rem; and Raw records wraps a long record in a
-  box of its own (the kit styles no `pre.wrap`). Both go once the SDK does
-  it. Browser-checked at 375, 582 and 1280 px: no page scrolls sideways,
-  and each page but Connection fits one screen (see below).
+- **Connection's tabs** (SDK 0.32.3): one group at a time under a tab row
+  (`?tab=`): Key, Limits and use, Stream, Trading, and Sessions once a
+  session is measured; "Enable trading" answers on the Trading tab, and
+  `read_connection` answers the whole. The SDK sizes the act column, so
+  "Enable trading" is not clipped at 375 and 582 px, and wraps a long raw
+  record within its box. Every page browser-checked at 375, 582 and 1280
+  px: none scrolls sideways, and each fits one screen but Raw records with
+  a long record open, whose box the SDK caps at 24rem.
 - **Liveness** (contract v27, ruling 418): the pricing stream's latest price
   or heartbeat (OANDA sends one every five seconds, prices only on change)
   is the live dataset's sign of life, recorded once a pass at OANDA's own
@@ -67,16 +69,11 @@ On SDK 0.32.2 and contract v27, the v27 build's plugin step (plans/the-v27-build
   OANDA states none of.
 - **Agents trade the Practice account only**: the Environment's Practice
   default and the demo-only guard's two keys are unchanged.
-- **The pins**: open-meridian 0.32.2 and plugin-python:0.32.2, core v27's
+- **The pins**: open-meridian 0.32.3 and plugin-python:0.32.3, core v27's
   runtime and harness (core a5da59a, merged as 6d346b3, chart 0.1.310, by
   tag and digest), and `meridian` 0.1.52 in `check.yaml`. No `DatasetLicence`
-  sets 0.32.2's attribution fields: core v27 refuses a declaration that
-  does, until its fix is published.
-
-Connection, the SDK's shared page, runs past one screen: at 1280 x 800 by
-about 20 px in Practice once both sessions are measured (70 px in sample
-data, its notice above), its Sessions in the left column; at 375 and 582 px
-its seven sections stack to about 1.7 screens. Its layout is the SDK's.
+  sets the attribution fields of 0.32.2 and 0.32.3: core v27 before 0.1.311
+  refuses a declaration that does.
 
 ## 0.5.1
 

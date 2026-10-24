@@ -240,8 +240,8 @@ def run():
     mapped = desk("admin", f"/map?account={account}&code={CODE}")
     must(mapped == {"mapped": CODE}, f"step 1, mapped: {mapped}")
     # From 0.6.0 on Connection, the SDK's one page for the data role and
-    # connectivity (457), by the account's venue account code.
-    runner("form", "--instance", "oanda", "--level", "admin", "--page", "/",
+    # connectivity (457), its Trading tab, by the account's venue account code.
+    runner("form", "--instance", "oanda", "--level", "admin", "--page", "/?tab=trading",
            "--post", "/enable-trading", f"venue_account_code={CODE}",
            "--expect", "Trading enabled on")
     runner("attribute", account, "waits=false", "note=No compliance plugin in this run.")

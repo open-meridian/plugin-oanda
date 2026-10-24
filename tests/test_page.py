@@ -59,7 +59,7 @@ def test_connection_says_read_only_and_offers_enable_trading_to_connectivitys_ad
     """From 0.6.0 the connection's trading is the SDK's one Connection for
     the data role and connectivity (457), Connections custody's alone."""
     client, rig, _ = held()
-    shown = client.get("/", "admin").body
+    shown = client.get("/", "admin", tab="trading").body
     assert "Read-only" in shown and "Enable trading" in shown
     read = client.call_tool("read_connection", level="admin").data
     assert read["trading"]["accounts"] == [
@@ -88,7 +88,7 @@ def test_enable_trading_and_its_check() -> None:
     assert done.status == 200 and "Trading enabled on" in done.body
     current = rig.connections.current
     assert current is not None and current.trading
-    assert "Read-only" not in client.get("/", "admin").body
+    assert "Read-only" not in client.get("/", "admin", tab="trading").body
     read = client.call_tool("read_connection", level="admin").data
     (account,) = read["trading"]["accounts"]
     assert account["trading"] is True
@@ -200,23 +200,29 @@ def test_connections_carry_the_demo_badge_and_say_an_old_environment_value() -> 
 
 def test_connection_draws_both_roles_sections_and_each_sessions_latency() -> None:
     """From 0.6.0 the SDK's one Connection for the data role and connectivity
-    (457): the data role's sections beside connectivity's, and Sessions once
-    a session is measured (contract v27)."""
+    (457), from SDK 0.32.3 one group at a time under a tab row: Key, Limits
+    and use, Stream, Trading (connectivity's sections), and Sessions once a
+    session is measured (contract v27)."""
     import re
 
     from meridian.roles import Latency
 
     client, rig, recorder = held()
-    shown = client.get("/", "admin").text
-    assert re.findall(r"<h2>([^<]*)</h2>", shown) == [
-        "Key", "Limits and use", "Stream", "Environment", "Accounts", "Placements",
-    ]  # fmt: skip
+
+    def tabs_and_sections(**query: str) -> tuple[list[str], list[str]]:
+        shown = client.get("/", "admin", **query).text
+        tabs = re.findall(r'<a class="tab(?: on)?" href="\?tab=[^"]*"[^>]*>([^<]*)</a>', shown)
+        return tabs, re.findall(r"<h2>([^<]*)</h2>", shown)
+
+    assert tabs_and_sections() == (["Key", "Limits and use", "Stream", "Trading"], ["Key"])
+    assert tabs_and_sections(tab="trading")[1] == ["Environment", "Accounts", "Placements"]
     latency = Latency(recorder)
     latency.rtt("orders", 12_000_000)
     held_now = page._now()
     page.hold(dataclasses.replace(held_now, latency=latency))
-    shown = client.get("/", "admin").text
-    assert "<h2>Sessions</h2>" in shown and "RTT p99" in shown
+    tabs, sections = tabs_and_sections(tab="sessions")
+    assert "Sessions" in tabs and sections == ["Sessions"]
+    assert "RTT p99" in client.get("/", "admin", tab="sessions").text
     (session,) = client.call_tool("read_connection", level="admin").data["trading"][
         "session_latency"
     ]
