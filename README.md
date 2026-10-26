@@ -20,11 +20,12 @@ for an Open Meridian deployment. The plugin holds three roles:
   OANDA's daily candle, on its day ending at 17:00 New York (ruled
   2026-10-13: "later, in the same repository").
 
-Version 0.6.0 (not released) is built on open-meridian 0.32.3, contract v27:
-one Connection for its data and connectivity roles, the SDK's, tabbed (ruling 457),
+Version 0.7.0 is built on open-meridian 0.33.1, contract v28: its sessions'
+latency and feed delay reported, its quotes judged at the edge. From
+contract v27: one Connection for its data and connectivity roles, the SDK's, tabbed (ruling 457),
 with its Raw records; the live dataset's liveness from the pricing stream's
 heartbeats and no declared delay; each session's latency, recorded and
-shown, not yet reported (core receives it from contract v28); and its
+shown; and its
 placement types on its catalogue, direct market access alone. Its whole
 declaration -- its settings, pages and tools, the accounts it names by
 OANDA's IDs, its storage and its catalogue -- and its documentation are in
@@ -127,8 +128,9 @@ live. Connection and Connections show the badge, Demo, Live, or "Live
   clock skew from the heartbeat's time, reconnects, 429s and round trip
   (the REST pricing calls', the stream having no ping), and each row's age
   at the edge, its feed delay; and the `orders` session's round trips,
-  order acknowledgements and fill delays. Shown on Connection's Sessions;
-  not yet sent: core receives ReportLatency from contract v28 (ruling 515).
+  order acknowledgements and fill delays. Shown on Connection's Sessions,
+  and from 0.7.0 (contract v28, ruling 518) reported every 10 seconds
+  (ReportLatency).
 
 ## Trading
 

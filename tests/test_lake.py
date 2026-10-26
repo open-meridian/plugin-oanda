@@ -20,9 +20,14 @@ named in `NOT_PRESENTED` with why:
 - outcomes: OANDA lists no event contract;
 - rates (contract v27): OANDA quotes currency pairs, and publishes no
   fixing, average, index level or curve;
-- latency (ruling 518): `reports-its-feed-delay` waits for core to receive
-  ReportLatency, from contract v28 (ruling 515); the feed delay is recorded
-  all the same.
+- from contract v28 option chains, filings, holdings, dividends and
+  ratings, which OANDA never states, and the duplicate and gap cases (about
+  quotes): its pricing stream numbers no message.
+
+From contract v28 `reports-its-feed-delay` (ruling 518) is presented: each
+quote streamed for a standing want has its age at the edge recorded and
+reported; and `a-crossed-quote-is-recorded-invalid` (ruling 424), a price
+whose bid is above its ask judged invalid by the SDK's edge checks.
 
 `queries-the-lake-within-bounds` is about trades from contract v27, so it is
 not presented with them. `records-a-datasets-liveness` is OANDA's own: the
@@ -42,6 +47,7 @@ from pathlib import Path
 
 from meridian.operations import as_decimal, as_money
 from meridian.plugin.v1 import operations_pb2 as ops
+from meridian.roles.data.testing import feed_delay
 from meridian.suites import Recorder, run, suite
 
 from oanda import moments
@@ -63,10 +69,20 @@ NEVER = {
     "rates": (
         "OANDA quotes currency pairs: it publishes no fixing, average, index level or curve"
     ),
-    "latency": "core receives ReportLatency from contract v28, ruling 515",
+    # Contract v28 (ruling 602).
+    "option chains": "OANDA quotes currency pairs here: no option chain",
+    "filings": "OANDA quotes currency pairs: no company's filings",
+    "holdings": "OANDA quotes currency pairs: no holdings report",
+    "corporate actions": "OANDA quotes currency pairs: no declared dividend",
+    "ratings": "OANDA quotes currency pairs: no rating",
 }
 NOT_PRESENTED: dict[str, str] = {
     case.name: NEVER[case.about] for case in suite("data").cases if case.about in NEVER
+} | {
+    # Contract v28 (about quotes, ruling 602), named through a table: meridian
+    # 0.1.52's check holds contract v27's suites.
+    case: "OANDA's pricing stream numbers no message: no sequence to repeat or skip"
+    for case in ("a-duplicate-is-recorded-suspicious", "rows-after-a-gap-are-suspicious")
 }
 
 QUOTE = "meridian.v1.Quote"
@@ -162,6 +178,41 @@ def producers(root: Path) -> dict[str, Producer]:
         )
         await rig.lake.flush()
 
+    async def streamed(lake: Recorder, bid: str, ask: str, latency: object = None) -> None:
+        # A pair kept current, OANDA's stream stating its price: recorded
+        # unasked for the standing want, aged and judged at the edge.
+        rig = LakeRig(lake, storage=fresh())
+        if latency is not None:
+            rig.lake = type(rig.lake)(
+                lake, rig.connections, rig.lake.pairs, rig.lake.raw,
+                clock_ns=rig.lake.clock_ns, latency=latency,
+            )  # fmt: skip
+        lake.answer(
+            "ObservationsWanted",
+            lambda _: [want("WNT-9", "live", [EUR], data_type=QUOTE, standing=True)],
+        )
+        await lake.receive(observations_wanted=rig.lake.on_want)
+        rig.lake.heard(
+            {
+                "type": "PRICE",
+                "instrument": "EUR_USD",
+                "time": "2026-10-13T15:00:01.250000000Z",
+                "tradeable": True,
+                "bids": [{"price": bid, "liquidity": 1000000}],
+                "asks": [{"price": ask, "liquidity": 1000000}],
+            },
+            rig.lake.clock_ns(),
+        )
+        await rig.lake.flush()
+
+    async def delayed(lake: Recorder, latency: object) -> None:
+        # Contract v28 (ruling 518): the quote's age at the edge, reported.
+        await streamed(lake, "1.08711", "1.08725", latency)
+
+    async def crossed(lake: Recorder) -> None:
+        # Contract v28 (ruling 424): the bid above the ask, recorded invalid.
+        await streamed(lake, "1.08731", "1.08725")
+
     async def withdrawn(lake: Recorder) -> None:
         rig = LakeRig(lake, storage=fresh())
         lake.answer(
@@ -198,6 +249,8 @@ def producers(root: Path) -> dict[str, Producer]:
         "a-one-sided-quote": one_sided,
         "reads-its-datasets-licences": licences,
         "records-a-datasets-liveness": heartbeat,
+        "reports-its-feed-delay": feed_delay(delayed),
+        "a-crossed-quote-is-recorded-invalid": crossed,
     }
 
 
@@ -404,11 +457,11 @@ def test_a_heartbeat_is_the_live_datasets_liveness_at_oandas_time_once() -> None
     assert item.venue_id == rig.lake.venue.venue_id
 
 
-def test_the_pricing_streams_session_and_feed_delay_are_recorded_not_reported() -> None:
+def test_the_pricing_streams_session_is_recorded_and_reported() -> None:
     """The stream's session (`pricing-stream`, REST for its round trip, the
     stream having no ping): each pricing call's duration, the heartbeat's
-    sign of life and clock skew, and each streamed row's age at the edge --
-    recorded, never sent until core receives ReportLatency (ruling 515)."""
+    sign of life and clock skew -- recorded, and from contract v28 reported
+    (ReportLatency, rulings 515 and 518)."""
     from meridian.roles import Latency
 
     recorder = Recorder(INSTANCE)
@@ -432,4 +485,4 @@ def test_the_pricing_streams_session_and_feed_delay_are_recorded_not_reported() 
     (stream,) = latency.session_latency()
     assert stream.session == "pricing-stream" and stream.transport == "rest"
     assert stream.alive_at_ns == rig.lake.clock_ns()
-    assert recorder.on("ReportLatency") == []
+    assert recorder.on("ReportLatency")

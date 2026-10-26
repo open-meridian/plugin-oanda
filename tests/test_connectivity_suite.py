@@ -30,6 +30,7 @@ import asyncio
 from decimal import Decimal
 
 from meridian.plugin.v1 import operations_pb2 as ops
+from meridian.roles import Latency
 from meridian.suites import ANSWERED_BY_SDK, Recorder, names, run, suite
 
 from oanda import synthetic
@@ -77,10 +78,19 @@ NOT_PRESENTED = {
         "OANDA takes no request for quote: it is the counterparty to every order, at the "
         "price it streams, so its catalogue lists direct market access alone"
     ),
-    # Ruling 518: about `latency`, not presented until core receives it.
-    "reports-a-sessions-round-trip": (
-        "core receives ReportLatency from contract v28, ruling 515"
-    ),
+    # Contract v28: an option's expiry (about options) and a package's fill
+    # (about packages; ruling 602), named through a table: meridian 0.1.52's
+    # check holds contract v27's suites.
+    **{
+        case: why
+        for case, why in (
+            ("reports-an-expiry", "OANDA's pairs here are currencies: no option to expire"),
+            (
+                "reports-a-package-fill",
+                "it places single orders in currency pairs: OANDA takes no package",
+            ),
+        )
+    },
 }
 
 
@@ -90,6 +100,18 @@ async def acknowledged(recorder: Recorder) -> None:
     held = placement(quantity=f"{synthetic.WORKS}")
     rig.holds(held)
     await rig.hear(held)
+
+
+async def round_trip(recorder: Recorder) -> None:
+    """Contract v28 (ruling 518): the REST session's round trips, each call
+    the Trader makes to OANDA, reported."""
+    latency = Latency(recorder)
+    rig = TradeRig(recorder, latency=latency)
+    await rig.started()
+    held = placement(quantity=f"{synthetic.WORKS}")
+    rig.holds(held)
+    await rig.hear(held)
+    await latency.report()
 
 
 async def another_instances(recorder: Recorder) -> None:
@@ -267,6 +289,7 @@ PRODUCERS: dict[str, Producer] = {
     "catches-up-placements-after-a-loss": caught_up,
     "reads-the-instructions-in-force-on-start": started,
     "reports-a-symbol-it-cannot-resolve": unknown_symbol,
+    "reports-a-sessions-round-trip": round_trip,
 }
 
 

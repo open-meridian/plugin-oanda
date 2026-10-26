@@ -94,6 +94,12 @@ NOT_PRESENTED = {
     "activity-re-resolved-when-a-plan-code-is-linked-later": (
         "OANDA names no plan's own fund code: it has no plan"
     ),
+    # Contract v28 (about options; ruling 602), named through a table:
+    # meridian 0.1.52's check holds contract v27's suites.
+    **{
+        case: "OANDA's accounts hold currency pairs: no option to be assigned"
+        for case in ("reports-an-assignment",)
+    },
 }
 
 
