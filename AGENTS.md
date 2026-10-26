@@ -82,7 +82,7 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   457, with its Raw records, `raw_records_page`; OANDA's Trader read through
   `page._Connectivity`). Its catalogue lists direct market access alone
   (contract v27); the `orders` and `pricing-stream` sessions' latency is
-  recorded on one `meridian.roles.Latency`, never sent until contract v28.
+  recorded on one `meridian.roles.Latency`, reported from contract v28.
   The live dataset's liveness is the pricing stream's latest price or
   heartbeat, at OANDA's time (`Lake.alive`).
 - **Custody** (`custody.py`) reports the account, its sync status, its

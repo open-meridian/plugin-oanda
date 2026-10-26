@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.7.0
+
+On open-meridian 0.33.1, contract v28 (plugin-common-v28), on core v28's
+harness.
+
+- **Latency, reported** (ruling 518, required again from contract v28): the
+  `orders` and `pricing-stream` sessions' latency and each streamed row's
+  age at the edge, recorded on one `roles.Latency` since 0.6.0, are sent
+  every 10 seconds (`ReportLatency`, the SDK's 0.33.0).
+  `reports-its-feed-delay` and `reports-a-sessions-round-trip` are
+  presented.
+- **The edge's checks** (ruling 424, the SDK's `Wants`): a streamed price
+  whose bid is above its ask is recorded invalid
+  (`a-crossed-quote-is-recorded-invalid` presented).
+- **Not presented** (ruling 602): data -- option chains, filings,
+  holdings, dividends and ratings, and the duplicate and gap cases (its
+  pricing stream numbers no message); connectivity -- an expiry and a
+  package fill (currency pairs, single orders); custody -- an assignment.
+- **`meridian plugin migrate`** (to_0_33_0, to_0_33_1): lake.py's
+  SubjectRefs are `meridian.SubjectRef` (ruling 599).
+- **The pins:** open-meridian 0.33.1 and plugin-python:0.33.1 by tag and
+  digest; core v28's runtime and harness at `8def82a` (chart 0.1.313) by
+  digest; `meridian` stays 0.1.52 in check.yaml.
+- The README's "not released" is gone.
+
 ## 0.6.0
 
 On SDK 0.32.3 and contract v27, the v27 build's plugin step (plans/the-v27-build

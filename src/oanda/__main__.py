@@ -153,7 +153,7 @@ async def run() -> None:
             plugin.identity.instance_id,
             ", ".join(plugin.identity.roles) or "none",
         )
-        # Each session's latency (contract v27): recorded, not yet reported.
+        # Each session's latency (contract v27), reported from contract v28.
         latency = roles.Latency(plugin)
         storage = edge.storage_dir()
         raw = RawStore(storage_root(storage), storage)

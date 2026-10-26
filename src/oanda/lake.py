@@ -488,7 +488,7 @@ class Lake:
     ) -> ObservationMeta:
         return ObservationMeta(
             row_key=row_key,
-            subjects=[ops.SubjectRef(entity_id=subject)],
+            subjects=[meridian.SubjectRef(entity_id=subject)],
             source=ops.Source(dataset=self.wants.dataset(key), venue_id=self.venue.venue_id),
             valid_from_ns=valid_from_ns,
             valid_until_ns=valid_until_ns,
