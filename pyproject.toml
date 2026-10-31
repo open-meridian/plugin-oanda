@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oanda"
-version = "0.7.0"
+version = "0.7.1"
 description = "Spot FX through OANDA's v20 API for an Open Meridian deployment: orders placed and filled, the account's positions, cash and activity, and OANDA's prices in the lake"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 # speaks one version of the contract, and a range would let a rebuild pick up
 # another. The Dockerfile's base is the same version. OANDA's v20 API is
 # reached with the standard library alone (src/oanda/venue.py).
-dependencies = ["open-meridian==0.33.1"]
+dependencies = ["open-meridian==0.33.4"]
 
 [project.urls]
 Repository = "https://github.com/open-meridian/plugin-oanda"
