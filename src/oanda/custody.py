@@ -324,11 +324,14 @@ class Status:
 
 
 class Syncer:
-    """One read of the account at a time, and what it found."""
+    """One read of the account at a time, and what it found. `role` is the
+    custody role's class its acts are made through (open-meridian 0.35), or
+    the suite's `Recorder` in its tests; the plugin-wide items (raw records,
+    what is not carried, health) through its `plugin`."""
 
     def __init__(
         self,
-        plugin: Any,
+        role: Any,
         connections: Connections,
         *,
         now: Callable[[], datetime],
@@ -336,7 +339,7 @@ class Syncer:
         pairs: PairMap,
         linked: Callable[[str], bool],
     ) -> None:
-        self._plugin = plugin
+        self._role = role
         self.connections = connections
         self.now = now
         self.raw = raw
@@ -387,7 +390,7 @@ class Syncer:
         key = self._keep_read(connection, now, calls)
         account = as_json(held.get("account"))
         for scheme, name in seen_in_account(account):
-            self._plugin.note_not_carried(scheme, name)
+            self._role.plugin.note_not_carried(scheme, name)
         home = str(account.get("currency") or "USD")
         self.status = Status(
             read_at=now,
@@ -418,7 +421,7 @@ class Syncer:
     ) -> None:
         """The plugin's health and figures on the heartbeat (`plugin.report`);
         a stand-in for the sidecar that keeps no heartbeat is told nothing."""
-        report = getattr(self._plugin, "report", None)
+        report = getattr(self._role.plugin, "report", None)
         if report is not None:
             await report(healthy=healthy, detail=detail, figures=figures)
 
@@ -469,7 +472,7 @@ class Syncer:
 
     async def _report_account(self, connection: Connection, account: Json) -> None:
         kind, said = account_kind(account)
-        await self._plugin.report_external_accounts(
+        await self._role.report_external_accounts(
             accounts=[
                 meridian.ExternalAccount(
                     external_account_id=connection.account_id,
@@ -491,7 +494,7 @@ class Syncer:
     ) -> None:
         synced = synced if synced is not None else now
         opened = moments.ns(account.get("createdTime"))
-        await self._plugin.report_sync_status(
+        await self._role.report_sync_status(
             source=SOURCE,
             external_account_id=connection.account_id,
             state=state,
@@ -513,7 +516,7 @@ class Syncer:
         OANDA names by its ISO 4217 code): "" where it holds none, or more
         than one."""
         if (code, cash) not in self._cash:
-            found = await self._plugin.resolve_identifier(
+            found = await self._role.resolve_identifier(
                 identifiers=[meridian.Identifier(scheme="iso4217", value=code)],
                 stated_asset_class="cash" if cash else None,
                 stated_currency=code if cash else "",
@@ -532,7 +535,7 @@ class Syncer:
                 f"no value date: the deployment holds no cash instrument for {base}/{quote}",
             )
         at_ns = moments.of(now)
-        answer = await self._plugin.compute_date(
+        answer = await self._role.compute_date(
             spot=ops.SpotDateInputs(pair=[base_id, quote_id], at_ns=at_ns), as_of_ns=at_ns
         )
         if answer.outcome == ops.DATE_OUTCOME_COMPUTED and answer.date:
@@ -586,7 +589,7 @@ class Syncer:
     async def _resolve(self, row: Row, as_of_ns: int, now: datetime) -> dict[str, Any]:
         identifiers = [meridian.Identifier(scheme="iso4217", value=row.code)]
         cash = row.kind == "CURRENCY"
-        answer = await self._plugin.resolve_identifier(
+        answer = await self._role.resolve_identifier(
             identifiers=identifiers,
             as_of_ns=as_of_ns,
             currency=row.code if cash else "",
@@ -595,7 +598,7 @@ class Syncer:
         )
         if answer.instrument_id:
             return {"instrument_id": answer.instrument_id}
-        await self._plugin.report_missing_instrument(
+        await self._role.report_missing_instrument(
             source=SOURCE,
             asset_class="cash" if cash else None,
             asset_class_as_reported=(
@@ -632,7 +635,7 @@ class Syncer:
                         margin_requirement=None if used is None else meridian.Money(used, home),
                     )
                 )
-            opened = await self._plugin.record_holdings_statement(
+            opened = await self._role.record_holdings_statement(
                 source=SOURCE,
                 external_statement_id=statement_id,
                 external_account_id=connection.account_id,
@@ -641,19 +644,21 @@ class Syncer:
                 read_at_ns=as_of_ns,
                 expected_rows=len(rows),
                 figures=figures,
-                raw_record=self._plugin.raw_record(f"{connection.account_id}/{key}/account"),
+                raw_record=self._role.plugin.raw_record(
+                    f"{connection.account_id}/{key}/account"
+                ),
                 provenance=[derived("institution", NO_INSTITUTION)],
             )
             self.status.statement_id = opened.statement_id
             if opened.already_recorded:
                 return
             for row, instrument in zip(rows, instruments, strict=True):
-                await self._plugin.record_holding(
+                await self._role.record_holding(
                     statement_id=opened.statement_id,
                     external_account_id=connection.account_id,
                     side="HOLDING_SIDE_LONG",
                     quantity=row.quantity,
-                    raw_record=self._plugin.raw_record(
+                    raw_record=self._role.plugin.raw_record(
                         f"{connection.account_id}/{key}/account"
                     ),
                     **self._split(row),
@@ -703,10 +708,10 @@ class Syncer:
             kind = str(transaction.get("type") or "")
             if kind == "ORDER_FILL":
                 for scheme, name in seen_in_fill(transaction, "custody"):
-                    self._plugin.note_not_carried(scheme, name)
+                    self._role.plugin.note_not_carried(scheme, name)
             elif kind == "DAILY_FINANCING":
                 for scheme, name in seen_in_financing(transaction):
-                    self._plugin.note_not_carried(scheme, name)
+                    self._role.plugin.note_not_carried(scheme, name)
             key = (
                 self.raw.keep_activity(
                     connection.account_id,
@@ -734,7 +739,7 @@ class Syncer:
                         }
                     )
                 try:
-                    await self._plugin.record_activity(
+                    await self._role.record_activity(
                         external_account_id=connection.account_id,
                         source=SOURCE,
                         activity=meridian.CustodialActivity(
@@ -746,7 +751,7 @@ class Syncer:
                             price=each.price,
                             amount=each.amount,
                             description=each.description,
-                            raw_record=self._plugin.raw_record(key),
+                            raw_record=self._role.plugin.raw_record(key),
                             **instrument,
                         ),
                     )

@@ -36,6 +36,7 @@ import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 import meridian
 from meridian.plugin.v1 import operations_pb2 as ops
@@ -137,10 +138,12 @@ def failure(failed: BaseException) -> str:
 
 class Links:
     """The plugin's links as its account scope last gave them, and links sent
-    for the admin viewing the page."""
+    for the admin viewing the page. `role` is the custody role's class its
+    links are asked through (open-meridian 0.35), or the suite's `Recorder`
+    in its tests."""
 
-    def __init__(self, plugin: meridian.Plugin, settle_seconds: float = SETTLE_SECONDS) -> None:
-        self._plugin = plugin
+    def __init__(self, role: Any, settle_seconds: float = SETTLE_SECONDS) -> None:
+        self._role = role
         self._settle = settle_seconds
         self._scope = meridian.AccountScope()
         # Deliveries and the pages' views run on the loop; a read from any other
@@ -172,7 +175,7 @@ class Links:
     async def offered(self, acting_for: str) -> Offered:
         """The deployment's accounts, for the admin the header names."""
         try:
-            read = await self._plugin.read_accounts_for_linking(acting_for=acting_for)
+            read = await self._role.read_accounts_for_linking(acting_for=acting_for)
         except meridian.MeridianError as failed:
             return Offered(refused=refusal(failed))
         return Offered(
@@ -202,7 +205,7 @@ class Links:
         neither, remove the link; a link replaces the one standing. Returns
         the account linked to, or "", once the account scope shows it or a
         few seconds have passed. A refusal is raised as the SDK raises it."""
-        linked = await self._plugin.link_external_account(
+        linked = await self._role.link_external_account(
             external_account_id=external_account_id,
             account_id=account_id,
             new_account_name=name,
@@ -210,8 +213,9 @@ class Links:
             new_account_type=account_type if name else "",
             acting_for=acting_for,
         )
-        await self._settled(external_account_id, linked.account_id)
-        return linked.account_id
+        account_id_linked: str = linked.account_id
+        await self._settled(external_account_id, account_id_linked)
+        return account_id_linked
 
     async def link_several(
         self, acting_for: str, pairs: Sequence[tuple[str, str]]
@@ -227,7 +231,7 @@ class Links:
         async def one(external_account_id: str, account_id: str) -> str:
             async with gate:
                 try:
-                    await self._plugin.link_external_account(
+                    await self._role.link_external_account(
                         external_account_id=external_account_id,
                         account_id=account_id,
                         acting_for=acting_for,

@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.8.0
+
+On open-meridian 0.35.1, contract v29 (rulings 1001 to 1005 and 1009 to 1023:
+each role one class), on core v29's harness.
+
+- **Each role one class:** `Data` (`lake.py`'s `Lake`, the data role's
+  class), `Trading` (`trading.py`'s `Trader`, the connectivity role's) and
+  `Custody` (the custody reads and links, `Syncer` and `Links` making their
+  acts through it), registered with `meridian.run`, which delivers the
+  settings before anything is heard, hears the lake's wants and the book's
+  placements and instructions on one stream, serves the pages and starts
+  each class only where the instance holds its role. What they share is
+  `Oanda`'s, and the first to start keeps the plugin-wide loops (the
+  account scope followed, the accounts listed and read, storage tended);
+  the latency recorder reports through the first holding `report_latency`.
+  Each `run` is started again after a backoff should it fail, in place of
+  the plugin's own `again` loop; the hand-wired tasks and signal handling
+  are gone.
+- **The pricing stream's reconnect** waits on the SDK's `sessions.Backoff`
+  (ruling 1027), from the first wait again once it opens, within its
+  jitter; the stream itself stays the plugin's.
+- **The suite's v29 cases:** a derived series and a pool's factor not
+  presented, with why.
+- **Tests:** the role classes bound to the suite's `Recorder`
+  (`recorder.bind`), what they hear handed by `rigs.deliver`.
+- **e2e:** the desk's portfolio, oms, ems and reporting each a role class,
+  run with `meridian.run_async`.
+- **The pins:** open-meridian 0.35.1 and plugin-python:0.35.1 by tag and
+  digest (`meridian plugin migrate --to 0.35.1`); core v29's runtime and
+  harness at `1ae36f0` (chart 0.1.339) by digest; `meridian` 0.1.56 in
+  check.yaml (was 0.1.52).
+
 ## 0.7.1
 
 SDK 0.33.4: raw-record writes and enum conversion fixes (ruling 937).

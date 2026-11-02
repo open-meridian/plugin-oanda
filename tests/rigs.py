@@ -18,7 +18,8 @@ from typing import Any, cast
 import meridian
 from meridian import edge
 from meridian.plugin.v1 import operations_pb2 as ops
-from meridian.suites import Recorder
+from meridian.receive import Heard
+from meridian.suites import Recorder, Sent
 from meridian.v1 import sidecar_pb2
 
 from oanda import moments, settings, synthetic
@@ -191,6 +192,17 @@ def resolved(params: ops.ResolveIdentifierParams) -> ops.ResolveIdentifierResult
     return ops.ResolveIdentifierResult(found=False, miss_reason=ops.MISS_REASON_AMBIGUOUS)
 
 
+async def deliver(recorder: Recorder, role: Any, row: str, messages: list[Any]) -> None:
+    """What the plugin's one stream hands a role class on `row`, as the
+    sidecar delivers it (open-meridian 0.35): each message to the class's
+    `on_<row>` method, in order, and kept as heard. Only `row`: where
+    `recorder.hear` would hand again what the recorder answered before on
+    the class's other rows."""
+    for message in messages:
+        recorder.sent.append(Sent(row, message))
+        await getattr(role, role.EVENTS[row])(Heard(row=row, message=message))
+
+
 class TradeRig:
     """A Trader over the recorder and the synthetic OANDA, trading enabled
     unless asked; the book's answers as the recorder gives them."""
@@ -249,18 +261,19 @@ class TradeRig:
             name: Kept(self.storage / "state" / f"{name}.json", empty)
             for name, empty in empties.items()
         }
-        return Trader(
-            self.recorder,
-            self.connection,
-            now=self.clock,
-            pairs=self.pairs,
-            raw=self.raw,
-            sent=self.kept["sent"],
-            cursor=self.kept["cursor"],
-            trades=self.kept["trades"],
-            waiting=self.kept["waiting"],
-            rolling=self.kept["rolling"],
-            latency=self.latency,
+        return self.recorder.bind(
+            Trader(
+                self.connection,
+                now=self.clock,
+                pairs=self.pairs,
+                raw=self.raw,
+                sent=self.kept["sent"],
+                cursor=self.kept["cursor"],
+                trades=self.kept["trades"],
+                waiting=self.kept["waiting"],
+                rolling=self.kept["rolling"],
+                latency=self.latency,
+            )
         )
 
     def _instrument(self, params: ops.ResolveInstrumentParams) -> ops.ResolveInstrumentResult:
@@ -322,11 +335,12 @@ class TradeRig:
         self.orders = [order_of(each, **changes) for each in placements]
 
     async def hear(self, *placements: ops.Placement) -> None:
-        self.recorder.answer(
+        await deliver(
+            self.recorder,
+            self.trader,
             "PlacementUpdated",
-            lambda _: [ops.PlacementUpdatedEvent(placement=each) for each in placements],
+            [ops.PlacementUpdatedEvent(placement=each) for each in placements],
         )
-        await self.recorder.receive(placement_updated=self.trader.on_placement)
 
     async def instruct(self, value: ops.TradingInstructionValue) -> None:
         instruction = ops.TradingInstruction(
@@ -334,11 +348,12 @@ class TradeRig:
             value=value,
             entry=ops.EntryMeta(entry_id="ENT-stop-1"),
         )
-        self.recorder.answer(
+        await deliver(
+            self.recorder,
+            self.trader,
             "TradingInstructionChanged",
-            lambda _: ops.TradingInstructionChangedEvent(instruction=instruction),
+            [ops.TradingInstructionChangedEvent(instruction=instruction)],
         )
-        await self.recorder.receive(trading_instruction_changed=self.trader.on_instruction)
 
     async def started(self) -> None:
         """The trader started, the cursor at the account's last transaction."""
@@ -422,12 +437,13 @@ class LakeRig:
         assert self.connections.choose(ACCOUNT, "Rig Admin") == ""
         recorder.answer("ResolveIdentifier", resolve)
         recorder.answer("ResolveInstrument", instrument_of)
-        self.lake = Lake(
-            recorder,
-            self.connections,
-            PairMap(None),
-            edge.RawStore(self.storage, kind="prices"),
-            clock_ns=lambda: moments.of(self.clock()),
+        self.lake = recorder.bind(
+            Lake(
+                self.connections,
+                PairMap(None),
+                edge.RawStore(self.storage, kind="prices"),
+                clock_ns=lambda: moments.of(self.clock()),
+            )
         )
 
 

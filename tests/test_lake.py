@@ -22,7 +22,9 @@ named in `NOT_PRESENTED` with why:
   fixing, average, index level or curve;
 - from contract v28 option chains, filings, holdings, dividends and
   ratings, which OANDA never states, and the duplicate and gap cases (about
-  quotes): its pricing stream numbers no message.
+  quotes): its pricing stream numbers no message;
+- from contract v29 derived series and pools' factors, which OANDA never
+  states.
 
 From contract v28 `reports-its-feed-delay` (ruling 518) is presented: each
 quote streamed for a standing want has its age at the edge recorded and
@@ -53,7 +55,7 @@ from meridian.suites import Recorder, run, suite
 from oanda import moments
 from oanda.lake import read_price
 
-from rigs import EUR, INSTANCE, JPY, LakeRig, cash_id, want
+from rigs import EUR, INSTANCE, JPY, LakeRig, cash_id, deliver, want
 
 Producer = Callable[[Recorder], Awaitable[None]]
 
@@ -75,6 +77,9 @@ NEVER = {
     "holdings": "OANDA quotes currency pairs: no holdings report",
     "corporate actions": "OANDA quotes currency pairs: no declared dividend",
     "ratings": "OANDA quotes currency pairs: no rating",
+    # Contract v29 (SDK 0.34.0, 0.35.0).
+    "derived series": "OANDA's prices are recorded as quoted: no series derived from them",
+    "factors": "OANDA quotes currency pairs: no pool, so no pool's factor",
 }
 NOT_PRESENTED: dict[str, str] = {
     case.name: NEVER[case.about] for case in suite("data").cases if case.about in NEVER
@@ -93,8 +98,7 @@ TUESDAY = "2026-10-13"
 
 
 def run_want(rig: LakeRig, *messages: ops.ObservationsWantedEvent) -> None:
-    rig.recorder.answer("ObservationsWanted", lambda _: list(messages))
-    asyncio.run(rig.recorder.receive(observations_wanted=rig.lake.on_want))
+    asyncio.run(deliver(rig.recorder, rig.lake, "ObservationsWanted", list(messages)))
 
 
 def producers(root: Path) -> dict[str, Producer]:
@@ -108,8 +112,7 @@ def producers(root: Path) -> dict[str, Producer]:
     def wanted(*messages: ops.ObservationsWantedEvent, **rigged: object) -> Producer:
         async def produce(lake: Recorder) -> None:
             rig = LakeRig(lake, storage=fresh(), **rigged)  # type: ignore[arg-type]
-            lake.answer("ObservationsWanted", lambda _: list(messages))
-            await lake.receive(observations_wanted=rig.lake.on_want)
+            await deliver(lake, rig.lake, "ObservationsWanted", list(messages))
 
         return produce
 
@@ -144,11 +147,12 @@ def producers(root: Path) -> dict[str, Producer]:
     async def one_sided(lake: Recorder) -> None:
         # OANDA's stream states a bid and no ask for a pair kept current.
         rig = LakeRig(lake, storage=fresh())
-        lake.answer(
+        await deliver(
+            lake,
+            rig.lake,
             "ObservationsWanted",
-            lambda _: [want("WNT-9", "live", [EUR], data_type=QUOTE, standing=True)],
+            [want("WNT-9", "live", [EUR], data_type=QUOTE, standing=True)],
         )
-        await lake.receive(observations_wanted=rig.lake.on_want)
         rig.lake.heard(
             {
                 "type": "PRICE",
@@ -166,11 +170,12 @@ def producers(root: Path) -> dict[str, Producer]:
         # The pricing stream open on a pair kept current: a heartbeat and no
         # price changed, the live dataset's liveness at OANDA's time.
         rig = LakeRig(lake, storage=fresh())
-        lake.answer(
+        await deliver(
+            lake,
+            rig.lake,
             "ObservationsWanted",
-            lambda _: [want("WNT-9", "live", [EUR], data_type=QUOTE, standing=True)],
+            [want("WNT-9", "live", [EUR], data_type=QUOTE, standing=True)],
         )
-        await lake.receive(observations_wanted=rig.lake.on_want)
         rig.lake.stream.state = "open"
         rig.lake.heard(
             {"type": "HEARTBEAT", "time": "2026-10-13T15:00:05.000000000Z"},
@@ -183,15 +188,16 @@ def producers(root: Path) -> dict[str, Producer]:
         # unasked for the standing want, aged and judged at the edge.
         rig = LakeRig(lake, storage=fresh())
         if latency is not None:
-            rig.lake = type(rig.lake)(
-                lake, rig.connections, rig.lake.pairs, rig.lake.raw,
+            rig.lake = lake.bind(type(rig.lake)(
+                rig.connections, rig.lake.pairs, rig.lake.raw,
                 clock_ns=rig.lake.clock_ns, latency=latency,
-            )  # fmt: skip
-        lake.answer(
+            ))  # fmt: skip
+        await deliver(
+            lake,
+            rig.lake,
             "ObservationsWanted",
-            lambda _: [want("WNT-9", "live", [EUR], data_type=QUOTE, standing=True)],
+            [want("WNT-9", "live", [EUR], data_type=QUOTE, standing=True)],
         )
-        await lake.receive(observations_wanted=rig.lake.on_want)
         rig.lake.heard(
             {
                 "type": "PRICE",
@@ -215,11 +221,12 @@ def producers(root: Path) -> dict[str, Producer]:
 
     async def withdrawn(lake: Recorder) -> None:
         rig = LakeRig(lake, storage=fresh())
-        lake.answer(
+        await deliver(
+            lake,
+            rig.lake,
             "WantWithdrawn",
-            lambda _: [ops.WantWithdrawnEvent(want_id="WNT-1", dataset=f"{INSTANCE}:live")],
+            [ops.WantWithdrawnEvent(want_id="WNT-1", dataset=f"{INSTANCE}:live")],
         )
-        await lake.receive(want_withdrawn=rig.lake.on_withdrawn)
 
     async def licences(lake: Recorder) -> None:
         lake.answer(
@@ -355,11 +362,14 @@ def test_a_standing_want_is_streamed_at_most_once_a_second_a_pair() -> None:
     assert [len(batch.quotes) for batch in streamed] == [1]
     assert streamed[0].quotes[0].meta.raw.key.endswith("EUR_USD.jsonl#0")
     # Withdrawn: off the stream.
-    recorder.answer(
-        "WantWithdrawn",
-        lambda _: [ops.WantWithdrawnEvent(want_id="WNT-7", dataset=f"{INSTANCE}:live")],
+    asyncio.run(
+        deliver(
+            recorder,
+            rig.lake,
+            "WantWithdrawn",
+            [ops.WantWithdrawnEvent(want_id="WNT-7", dataset=f"{INSTANCE}:live")],
+        )
     )
-    asyncio.run(recorder.receive(want_withdrawn=rig.lake.on_withdrawn))
     assert rig.lake.streams == {}
 
 
@@ -467,13 +477,14 @@ def test_the_pricing_streams_session_is_recorded_and_reported() -> None:
     recorder = Recorder(INSTANCE)
     rig = LakeRig(recorder)
     latency = Latency(recorder, clock_ns=rig.lake.clock_ns)
-    rig.lake = type(rig.lake)(
-        recorder,
-        rig.connections,
-        rig.lake.pairs,
-        rig.lake.raw,
-        clock_ns=rig.lake.clock_ns,
-        latency=latency,
+    rig.lake = recorder.bind(
+        type(rig.lake)(
+            rig.connections,
+            rig.lake.pairs,
+            rig.lake.raw,
+            clock_ns=rig.lake.clock_ns,
+            latency=latency,
+        )
     )
     run_want(rig, want("WNT-1", "live", [EUR], data_type=QUOTE, standing=True))
     rig.lake.stream.state = "open"

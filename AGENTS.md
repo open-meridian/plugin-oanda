@@ -19,13 +19,22 @@ account is the product owner's, by hand. Never handle the token: it is a
 secret setting the plugin's admin enters in the dashboard. Never present
 OANDA as a partner: it is a vendor whose published API the plugin uses.
 
-- `src/oanda/__main__.py` connects to the sidecar, declares the settings
+- `src/oanda/__main__.py` runs one class per role with `meridian.run`
+  (open-meridian 0.35: each role one class), declaring the settings
   (`settings.py`: `environment` first, `practice` or `live`, then `token`,
   secret, and `account_id`, the names approved 2026-10-13; `account_id`
-  optional from 0.3.0) and the pages (`page.py`), and runs the custody reads
-  (`custody.py`), the trading work (`trading.py`) and the data role's
-  (`lake.py`, on the SDK's `meridian.roles.data`: wants, standing wants,
+  optional from 0.3.0) and the pages (`page.py`): `Custody` (the custody
+  reads, `custody.py`'s `Syncer`, and the links, `linking.py`, making
+  their acts through it), `Trading` (`trading.py`'s `Trader`, the
+  connectivity role's class) and `Data` (`lake.py`'s `Lake`, the data
+  role's class, on the SDK's `meridian.roles.data`: wants, standing wants,
   recording and licences, its pages the SDK's for a venue listing pairs).
+  What they share is `Oanda`'s; the first class to start keeps the
+  plugin-wide loops (the account scope, the accounts listed, storage
+  tended), and a class for a role the instance was not launched with is
+  not started. Tests bind the classes to the suite's `Recorder` and hand
+  them what they hear (`rigs.deliver`), or give `Syncer` and `Links` the
+  `Recorder` as their role.
   `venue.py` is OANDA's v20 REST and streams behind a small interface, the
   one module speaking HTTP to OANDA, standard library only, and says which
   environment its session reached (`paper` for the practice host, `live`
@@ -56,7 +65,7 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   accepted, after OANDA rolled it. Which dates its fills and rolls left in
   the book is kept in storage (`rolling.json`). Never a correction
   superseding a fill.
-- **Every value date comes from core** (`plugin.compute_date`, the spot
+- **Every value date comes from core** (`self.compute_date`, the spot
   inputs: the pair's two cash instruments and the fill's moment). OANDA's
   fill states none, so there is none beside it. Where the date read answers
   none, a fill waits, kept in storage, asked again each poll; a statement's
@@ -135,10 +144,10 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   the external account its connection reaches, and the sidecar takes it only
   once that external account is linked to one of the deployment's accounts
   (from contract v7; a statement naming none is refused). So the plugin
-  reports what it reaches (`plugin.report_external_accounts`, at start and
+  reports what it reaches (`self.report_external_accounts`, at start and
   when that changes), an admin of the plugin links each on its own Manage
-  page (`plugin.link_external_account(..., acting_for=request.caller.header)`,
-  the accounts offered from `plugin.read_accounts_for_linking`), and which are
+  page (`self.link_external_account(..., acting_for=request.caller.header)`,
+  the accounts offered from `self.read_accounts_for_linking`), and which are
   linked is the plugin's account scope (`plugin.account_scope()`, its
   `links`), read rather than kept.
 - **On a plugin holding several roles, name the roles each declaration
@@ -167,8 +176,9 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   [meridian.Figure("Connections", 3, state="warn", why="...")]`, sent on its
   heartbeat). Build no summary page or tiles of your own; report figures
   only where the plugin has work worth counting.
-- **Hear what the plugin's roles hear with `plugin.receive`**, a handler per
-  row (`custodial_position_updated=...`), and keep nothing of it: the SDK
+- **Hear what the plugin's roles hear in each role's class** (SDK 0.35), an
+  `on_<row>` method per row (`on_custodial_position_updated`), the classes
+  registered with `meridian.run(roles=[...])`, and keep nothing of it: the SDK
   reads the store on every start and after any gap, loss or broken stream,
   handing what it read on as `heard.caught_up`. A handler sees each change
   once, in order, and no store number. Everything heard and read is within
@@ -192,7 +202,7 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
 - **A custody plugin reports the custodian's activity, as the custodian
   states it.** Each activity on an account -- a purchase, a sale, a
   reinvested dividend, a split, a fee, a transfer -- goes to the street with
-  `plugin.record_activity(external_account_id=..., source=...,
+  `self.record_activity(external_account_id=..., source=...,
   activity=meridian.CustodialActivity(...))`. It is evidence that explains a
   break, never a source: the street derives no position, lot or figure from
   it, and nothing moves the book until a person confirms. Its `kind` is the
@@ -208,7 +218,7 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   kept once, so a retry or a resync is safe; a custodian restating an
   activity under a new identifier is a new one, reported, never merged. Say
   how far back the custodian's history reaches with
-  `plugin.report_sync_status(..., history_from="YYYY-MM-DD")`, report past
+  `self.report_sync_status(..., history_from="YYYY-MM-DD")`, report past
   activity back to it on first connection (a backfill), then each sync's new
   activity. Report each sync status as it changes, `state` saying what holds
   (`SYNC_STATE_NEEDS_SIGN_IN` when the person must sign in again): the street
@@ -275,23 +285,23 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   and report what does not resolve (`report_missing_instrument`,
   `report_missing_venue`); keep the vendor's product map in storage, never a
   vendor's code as a key. Record in batches of at most 500
-  (`plugin.record_prices`, `plugin.record_bars`), each row's `row_key` made
+  (`self.record_prices`, `self.record_bars`), each row's `row_key` made
   from its raw record so a repeat changes nothing and the day still forming is
   restated under the same key, its `business_date` a `datetime.date` in the
   dataset's declared day, its number parsed from the vendor's text as a
   `Decimal` (never through a `float`), and a price in a stablecoin on the
   token's own cash instrument (`Money(amount, instrument_id=...)`), never a
-  fiat code. Hear wants with `plugin.receive(observations_wanted=...,
-  want_withdrawn=...)`, record against each (`want_id=`) or decline it per
-  subject (`plugin.decline_want`). Its pages show its connection and its
+  fiat code. Hear wants in the data role's class (`on_observations_wanted`,
+  `on_want_withdrawn`, registered with `meridian.run`), record against each (`want_id=`) or decline it per
+  subject (`self.decline_want`). Its pages show its connection and its
   datasets, never a price: prices are the reading roles'. Hold it to the
   suite: `meridian.suites.run("data", producers)` on synthetic exchanges, each
   case mapped to the plugin's own conversion.
 - **A data plugin streaming trades and quotes records them as its source states
   them, converted at the edge.** Declare them in a live dataset apart
   (`data_types=["meridian.v1.Trade", "meridian.v1.Quote"]`, `modes=["stream"]`)
-  and record in batches of at most 500 (`plugin.record_trades`,
-  `plugin.record_quotes`), keyed by UTC instants with no `business_date`. A
+  and record in batches of at most 500 (`self.record_trades`,
+  `self.record_quotes`), keyed by UTC instants with no `business_date`. A
   trade carries its `meridian.TradeAttributes` in the platform's words,
   converted from the source's condition codes (a code with no conversion
   kept as reported in `meta.unconverted`, never guessed), and its
@@ -308,7 +318,7 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   (`meridian.roles.data.backfill_restart`: the last trade it recorded of each
   subject, `list_trades(..., latest_recorded=True)`, then the venue's history
   after it), and reads which of its datasets are licensed
-  (`plugin.list_datasets()`, its `licences`).
+  (`self.list_datasets()`, its `licences`).
 - **Follow the role's common part.** A person who knows a role knows any
   plugin of it: `meridian.roles.<role>` (`data`, `custody`, `operations`,
   `reporting`) gives each common page's record (`<Page>Read`, the page's
@@ -361,7 +371,7 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   across versions.
 - **Work out a date in core, never by hand.** A settlement date, a spot or
   tenor date, a roll or whether a day is a business day is
-  `plugin.compute_date(...)`, a calendar's days `plugin.read_calendar(...)`:
+  `self.compute_date(...)`, a calendar's days `self.read_calendar(...)`:
   the deployment's calendars and rules, one answer for every plugin, with
   the basis it was worked out on. A date outside a calendar's coverage is
   answered as such, never guessed.
