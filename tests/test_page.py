@@ -18,7 +18,7 @@ from oanda.linking import Links
 from oanda.pairs import PairMap
 from oanda.settings import ENVIRONMENT, config_from
 
-from rigs import ACCOUNT, EUR, CustodyRig, TradeRig, delivered, instrument_of, want
+from rigs import ACCOUNT, EUR, CustodyRig, TradeRig, deliver, delivered, instrument_of, want
 
 READER_ACCOUNT = "ACC-1"
 
@@ -36,12 +36,13 @@ def held(linked: bool = True) -> tuple[PageClient, CustodyRig, Recorder]:
     asyncio.run(links.hold(scope))
     trader = TradeRig(Recorder("oanda")).trader
     recorder.answer("ResolveInstrument", instrument_of)
-    lake = Lake(
-        recorder,
-        rig.connections,
-        PairMap(None),
-        edge.RawStore(rig.storage, kind="prices"),
-        clock_ns=lambda: moments.of(rig.clock()),
+    lake = recorder.bind(
+        Lake(
+            rig.connections,
+            PairMap(None),
+            edge.RawStore(rig.storage, kind="prices"),
+            clock_ns=lambda: moments.of(rig.clock()),
+        )
     )
     page.hold(page.Held(rig.syncer, rig.connections, links, asyncio.Event(), trader, lake))
     client = PageClient(
@@ -169,8 +170,7 @@ def test_the_data_roles_datasets_after_a_want() -> None:
     client, rig, recorder = held()
     lake = page._now().lake
     assert lake is not None
-    recorder.answer("ObservationsWanted", lambda _: [want("WNT-1", "live", [EUR])])
-    asyncio.run(recorder.receive(observations_wanted=lake.on_want))
+    asyncio.run(deliver(recorder, lake, "ObservationsWanted", [want("WNT-1", "live", [EUR])]))
     read = client.call_tool("read_datasets", level="admin")
     assert [s["dataset"] for s in read.data["served"]] == ["oanda:live", "oanda:daily"]
     assert read.data["served"][0]["recorded"] > 0

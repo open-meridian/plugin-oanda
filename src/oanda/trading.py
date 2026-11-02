@@ -163,6 +163,7 @@ from typing import Any, TypeVar
 import meridian
 from meridian.operations import as_decimal
 from meridian.plugin.v1 import operations_pb2 as ops
+from meridian.roles import connectivity
 
 from . import moments
 from .connection import Connection
@@ -373,12 +374,18 @@ class Shown:
     error: str = ""
 
 
-class Trader:
-    """OANDA's connectivity work, beside its custody reads."""
+class Trader(connectivity.Role):
+    """OANDA's connectivity work, beside its custody reads: the connectivity
+    role's class (open-meridian 0.35: each role one class), its acts made on
+    itself -- registered with `meridian.run`, or bound to the suite's
+    `Recorder` in its tests."""
+
+    # Its start reads the book itself: what was recorded before it started is
+    # not handed it again (as its `receive(seed=False)` was).
+    seed = False
 
     def __init__(
         self,
-        plugin: Any,
         connection: Callable[[], Connection | None],
         *,
         now: Callable[[], datetime],
@@ -392,8 +399,8 @@ class Trader:
         rolling: Kept | None = None,
         scope: Callable[[], meridian.AccountScope] = meridian.AccountScope,
         latency: Any = None,
+        poll_seconds: Callable[[], int] = lambda: POLL_SECONDS,
     ) -> None:
-        self._plugin = plugin
         #: The plugin's `meridian.roles.Latency`, where it keeps one (contract
         #: v27): the `orders` session's round trips, order acknowledgements,
         #: fill delays and sign of life.
@@ -406,7 +413,7 @@ class Trader:
         self._raw = raw
         self._secrets = secrets
         self._scope = scope
-        self.me: str = plugin.identity.instance_id
+        self._poll_seconds = poll_seconds
         self._sent = Sent(sent if sent is not None else Kept(None, []))
         # The last transaction taken, by account.
         self._cursor = cursor if cursor is not None else Kept(None, {})
@@ -430,8 +437,8 @@ class Trader:
         ] = {}
         # Whether placements and instructions heard before start are left to
         # start's own reads (`waits_to_start`, set where the plugin hears them
-        # on a stream opened before there is a connection), and whether it
-        # has started.
+        # on a stream opened before there is a connection: under
+        # `meridian.run`, always), and whether it has started.
         self.waits_to_start = False
         self.started = False
         self.shown = Shown()
@@ -444,6 +451,11 @@ class Trader:
         # The account's currency, in which OANDA states fees, financing and
         # profit: read from the account on start.
         self.home = "USD"
+
+    @property
+    def me(self) -> str:
+        """This instance's ID, as placements name their connectivity."""
+        return str(self.plugin.identity.instance_id)
 
     # ── Latency (contract v27) ──────────────────────────────────────────
 
@@ -472,7 +484,7 @@ class Trader:
     async def start(self) -> None:
         """On start: the instructions in force, the placements it works, the
         pair map, and its catalogue."""
-        listed = await self._plugin.list_trading_instructions()
+        listed = await self.list_trading_instructions()
         for instruction in listed.instructions:
             self._hold(instruction)
         await self._read_pairs()
@@ -504,7 +516,7 @@ class Trader:
         since `since`."""
         cursor = ""
         while True:
-            listed = await self._plugin.list_orders(since=since, cursor=cursor)
+            listed = await self.list_orders(since=since, cursor=cursor)
             orders = {order.order_id: order for order in listed.orders}
             for order in listed.orders:
                 for placement in order.placements:
@@ -562,7 +574,7 @@ class Trader:
             await self._asked_to_change(placement, order, worked)
 
     async def _order_of(self, placement: ops.Placement) -> ops.Order | None:
-        listed = await self._plugin.list_orders(account_id=placement.account_id)
+        listed = await self.list_orders(account_id=placement.account_id)
         for order in listed.orders:
             if order.order_id == placement.order_id:
                 found: ops.Order = order
@@ -571,7 +583,7 @@ class Trader:
 
     # ── Hearing ─────────────────────────────────────────────────────────
 
-    async def on_placement(self, heard: Any) -> None:
+    async def on_placement_updated(self, heard: Any) -> None:
         placement: ops.Placement = heard.message.placement
         if placement.connectivity_instance_id != self.me:
             return
@@ -581,7 +593,7 @@ class Trader:
             await self._resume(placement, None, ())
             await self._take_transactions()
 
-    async def on_instruction(self, heard: Any) -> None:
+    async def on_trading_instruction_changed(self, heard: Any) -> None:
         instruction: ops.TradingInstruction = heard.message.instruction
         if self.waits_to_start and not self.started:
             return  # start reads the instructions in force itself
@@ -642,7 +654,7 @@ class Trader:
         await self._take_transactions()
 
     async def _account_of(self, worked: Worked) -> str:
-        listed = await self._plugin.list_orders()
+        listed = await self.list_orders()
         for order in listed.orders:
             if order.order_id == worked.order_id:
                 return str(order.account_id)
@@ -684,7 +696,7 @@ class Trader:
         code (W3.1); "" where it holds none, which is reported missing, once
         in the process for a fill asked about again each poll."""
         identifiers = [meridian.Identifier(scheme="iso4217", value=code)]
-        found = await self._plugin.resolve_identifier(
+        found = await self.resolve_identifier(
             identifiers=identifiers,
             stated_asset_class="cash",
             stated_currency=code,
@@ -695,7 +707,7 @@ class Trader:
             return ""
         self._missing.add(code)
         now_ns = moments.of(self._now())
-        await self._plugin.report_missing_instrument(
+        await self.report_missing_instrument(
             source=SOURCE,
             asset_class="cash",
             identifiers=identifiers,
@@ -708,7 +720,7 @@ class Trader:
     async def _currency_of(self, instrument_id: str) -> str:
         """The ISO 4217 code of a cash instrument; "" for one that is not
         cash or names none."""
-        found = await self._plugin.resolve_instrument(instrument_id=instrument_id)
+        found = await self.resolve_instrument(instrument_id=instrument_id)
         if not found.found:
             return ""
         record = found.instrument
@@ -953,7 +965,7 @@ class Trader:
         worked.acknowledged = True
         worked.unknown = ""
         worked.unanswered = False
-        await self._plugin.report_placement(
+        await self.report_placement(
             placement_id=worked.placement_id,
             event=ops.PLACEMENT_EVENT_ACKNOWLEDGED,
             venue_order_id=oanda_order_id,
@@ -981,7 +993,7 @@ class Trader:
                     code=code,
                     text=str(failure.said.get("errorMessage") or "OANDA refused the order"),
                 )
-            await self._plugin.report_placement(
+            await self.report_placement(
                 placement_id=worked.placement_id,
                 event=ops.PLACEMENT_EVENT_REJECTED,
                 rejection_reason=ops.REJECTION_REASON_VENUE_REJECTED,
@@ -991,7 +1003,7 @@ class Trader:
             return
         # Never answered: asked about each poll, never sent again.
         worked.unanswered = True
-        await self._plugin.report_placement(
+        await self.report_placement(
             placement_id=worked.placement_id,
             event=ops.PLACEMENT_EVENT_OUTCOME_UNKNOWN,
             unknown_reason=ops.UNKNOWN_REASON_REQUEST_UNANSWERED,
@@ -1019,7 +1031,7 @@ class Trader:
         }
         raw = self._keep(connection, [call(OFFERED, stated, why)], "offered")
         log.info("rejected %s unsupported: %s", placement.placement_id, why)
-        await self._plugin.report_placement(
+        await self.report_placement(
             placement_id=placement.placement_id,
             event=ops.PLACEMENT_EVENT_REJECTED,
             rejection_reason=ops.REJECTION_REASON_UNSUPPORTED,
@@ -1077,7 +1089,7 @@ class Trader:
             if worked.unknown != state:
                 worked.unknown = state
                 worked.unanswered = False
-                await self._plugin.report_placement(
+                await self.report_placement(
                     placement_id=worked.placement_id,
                     event=ops.PLACEMENT_EVENT_OUTCOME_UNKNOWN,
                     unknown_reason=ops.UNKNOWN_REASON_VENUE_STATUS_NOT_MAPPED,
@@ -1146,7 +1158,7 @@ class Trader:
             return
         self._keep(connection, [call(CANCEL, answer, worked.oanda_order_id)], "cancel")
         if cause is not None:
-            await self._plugin.request_placement_change(
+            await self.request_placement_change(
                 placement_id=worked.placement_id,
                 change=meridian.PlacementChange(kind=ops.PLACEMENT_CHANGE_KIND_CANCEL),
                 reason=reason,
@@ -1196,7 +1208,7 @@ class Trader:
             }
             raw = self._keep(connection, [call(OFFERED, stated, why)], "offered")
             log.info("%s: the replace was rejected unsupported: %s", worked.placement_id, why)
-            await self._plugin.report_placement(
+            await self.report_placement(
                 placement_id=worked.placement_id,
                 event=ops.PLACEMENT_EVENT_REJECTED,
                 rejection_reason=ops.REJECTION_REASON_UNSUPPORTED,
@@ -1251,7 +1263,7 @@ class Trader:
         if new_id and new_id not in worked.order_ids:
             worked.order_ids.append(new_id)
         worked.quantity = quantity
-        await self._plugin.report_placement(
+        await self.report_placement(
             placement_id=worked.placement_id,
             event=ops.PLACEMENT_EVENT_REPLACED,
             venue_order_id=worked.oanda_order_id,
@@ -1269,7 +1281,7 @@ class Trader:
     ) -> None:
         code = str(failure.said.get("errorCode") or failure.status or "")
         text = str(failure.said.get("errorMessage") or "OANDA refused the change")
-        await self._plugin.report_placement(
+        await self.report_placement(
             placement_id=worked.placement_id,
             event=ops.PLACEMENT_EVENT_REJECTED,
             rejection_reason=ops.REJECTION_REASON_VENUE_REJECTED,
@@ -1403,7 +1415,7 @@ class Trader:
     ) -> ops.ComputeDateResult | None:
         """The date read's spot date for the pair at a moment (W3.20), or
         None where it answers none: never a date worked out here."""
-        settles = await self._plugin.compute_date(
+        settles = await self.compute_date(
             spot=ops.SpotDateInputs(pair=[base_instrument, quote_instrument], at_ns=at_ns),
             as_of_ns=at_ns,
         )
@@ -1423,7 +1435,7 @@ class Trader:
                     meridian.Fee(kind=kind or None, amount=meridian.Money(amount, self.home))
                 )
         for scheme, name in seen_in_fill(fill, "connectivity"):
-            self._plugin.note_not_carried(scheme, name)
+            self.plugin.note_not_carried(scheme, name)
         return fees
 
     async def _report_fill(
@@ -1457,7 +1469,7 @@ class Trader:
             delay = moments.of(self._now()) - at_ns
             if delay > 0:
                 self.latency.fill_delay(SESSION, delay)
-        done = await self._plugin.report_execution(
+        done = await self.report_execution(
             placement_id=worked.placement_id,
             venue_account_code=worked.code,
             venue_execution_id=venue_id,
@@ -1591,7 +1603,7 @@ class Trader:
             return False
         raw = self._keep(connection, [call(STREAMED, fill, transaction_id)], "fill")
         client = str(fill.get("clientOrderID") or "")
-        await self._plugin.report_execution(
+        await self.report_execution(
             venue_account_code=connection.code,
             instrument_id=base_instrument,
             side=BUY if units > 0 else SELL,
@@ -1670,7 +1682,7 @@ class Trader:
                 self._trades.value.setdefault("trades", {})[held["trade"]] = pid
             again: list[str] = []
             for charge in held.get("charges") or []:
-                done = await self._plugin.report_charge(
+                done = await self.report_charge(
                     placement_id=pid,
                     fee=meridian.Fee(
                         kind=ops.FEE_KIND_FINANCING,
@@ -1678,7 +1690,7 @@ class Trader:
                     ),
                     trade_date=charge["day"],
                     settlement_date=charge["day"],
-                    raw_record=self._plugin.raw_record(charge["raw"]),
+                    raw_record=self.plugin.raw_record(charge["raw"]),
                 )
                 charge_id = _charge_id(done)
                 if charge_id:
@@ -1772,7 +1784,7 @@ class Trader:
         )
         placement_id = (self._trades.value.get("trades") or {}).get(trade_id)
         if placement_id:
-            done = await self._plugin.report_charge(
+            done = await self.report_charge(
                 placement_id=placement_id,
                 fee=fee,
                 trade_date=day,
@@ -1788,7 +1800,7 @@ class Trader:
             return charge_id
         held = self._originated_trade(trade_id)
         if held is not None:
-            await self._plugin.report_charge(
+            await self.report_charge(
                 fee=fee, trade_date=day, settlement_date=day, raw_record=raw
             )
             held.setdefault("charges", []).append(
@@ -1836,7 +1848,7 @@ class Trader:
                 trade_id,
                 Decimal(each["amount"]),
                 int(each["at_ns"]),
-                self._plugin.raw_record(each["raw"]),
+                self.plugin.raw_record(each["raw"]),
             )
             if charge_id:
                 made.append(charge_id)
@@ -1922,7 +1934,7 @@ class Trader:
             froms = sorted(d for d in dates if day < d < to)
             dates = {d for d in dates if d >= to} | ({to} if froms else set())
         for n, from_date in enumerate(froms):
-            await self._plugin.report_value_date_roll(
+            await self.report_value_date_roll(
                 venue_account_code=str(held["code"]),
                 pair=[str(held["base"]), str(held["quote"])],
                 from_value_date=from_date,
@@ -1930,7 +1942,7 @@ class Trader:
                 value_date_basis=basis_of(answer.basis),
                 rolled_at_ns=at_ns,
                 charge_ids=list(entry["charge_ids"]) if n == len(froms) - 1 else [],
-                raw_record=self._plugin.raw_record(str(entry["raw"])),
+                raw_record=self.plugin.raw_record(str(entry["raw"])),
                 idempotency_key=str(
                     entry.get("key") or f"roll:{held['code']}:{entry['txn']}:{held['pair']}"
                 )
@@ -1985,7 +1997,7 @@ class Trader:
         )
         expired = reason in EXPIRED_REASONS
         worked.ended = "expired" if expired else "cancelled"
-        await self._plugin.report_placement(
+        await self.report_placement(
             placement_id=worked.placement_id,
             event=ops.PLACEMENT_EVENT_EXPIRED if expired else ops.PLACEMENT_EVENT_CANCELLED,
             raw_record=raw,
@@ -2017,7 +2029,7 @@ class Trader:
         if self.published.get(connection.code) == (offered, environment, types):
             return
         stated_at = moments.of(self._now())
-        await self._plugin.report_venue_catalogue(
+        await self.report_venue_catalogue(
             catalogue=meridian.VenueCatalogue(
                 venue_account_code=connection.code,
                 order_types=[
@@ -2049,7 +2061,7 @@ class Trader:
                 connection.synthetic,
                 self._secrets(),
             )
-        reference: ops.RawRecordRef = self._plugin.raw_record(
+        reference: ops.RawRecordRef = self.plugin.raw_record(
             f"trading/{connection.account_id}/{key or 'unkept'}/{what}"
         )
         return reference
@@ -2089,26 +2101,16 @@ class Trader:
                 log.warning("a streamed transaction was not taken: %s", failure)
             await asyncio.sleep(2)
 
-    async def run(self, poll_seconds: Callable[[], int], hears: bool = True) -> None:
-        """Start, hear placements and instructions, follow the stream and
-        poll until cancelled. Where `hears` is false the plugin hears them on
-        a stream of its own (with the data role, the one that hears the
-        lake's wants), and those heard before start are left to start's
-        reads, which come after them."""
+    async def run(self) -> None:
+        """Start, follow the stream and poll until cancelled. Placements and
+        instructions are heard on the plugin's one stream (`meridian.run`),
+        opened before there is a connection: those heard before start are
+        left to start's reads, which come after them (`waits_to_start`)."""
         while self._connection() is None:
             await asyncio.sleep(1)
         async with self._lock:
             self.started = True
             await self.start()
-        hearing = asyncio.create_task(
-            self._plugin.receive(
-                placement_updated=self.on_placement,
-                trading_instruction_changed=self.on_instruction,
-                seed=False,
-            )
-            if hears
-            else asyncio.Event().wait()
-        )
         following = asyncio.create_task(self.follow())
         try:
             while True:
@@ -2118,12 +2120,11 @@ class Trader:
                 except meridian.MeridianError as failure:
                     self.shown.error = str(failure)
                     log.warning("this poll stopped: %s", failure)
-                await asyncio.sleep(poll_seconds())
+                await asyncio.sleep(self._poll_seconds())
         finally:
-            for task in (hearing, following):
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+            following.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await following
 
 
 def _note(body: Json) -> str:

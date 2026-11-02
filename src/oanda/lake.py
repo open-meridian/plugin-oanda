@@ -85,6 +85,7 @@ from typing import Any
 
 import meridian
 from meridian import Money, ObservationMeta, Price, Quote, SourceTime, edge
+from meridian.helpers import sessions
 from meridian.plugin.v1 import operations_pb2 as ops
 from meridian.roles import data
 from meridian.roles.data import pairs as role_pairs
@@ -132,8 +133,6 @@ ENDPOINTS = (
     data.Endpoint("Daily candles", CANDLES_CALL, "the daily dataset's closes"),
     data.Endpoint("Pricing stream", STREAM_CALL, "the live dataset, kept current"),
 )
-
-Plugin = Any  # meridian.Plugin, or the suite's Recorder: the SDK's typed operations
 
 
 @dataclass(frozen=True)
@@ -269,12 +268,17 @@ class Stream:
     liveness_ns: int = 0
 
 
-@dataclass
-class Lake:
-    """The data role's work: resolving, recording, answering wants and keeping
-    them current (see the module)."""
+@dataclass(eq=False)
+class Lake(data.Role):
+    """The data role's class (open-meridian 0.35: each role one class), its
+    acts made on itself -- registered with `meridian.run`, or bound to the
+    suite's `Recorder` in its tests: resolving, recording, answering wants
+    and keeping them current (see the module)."""
 
-    plugin: Plugin
+    # The book's own reads come first: what was recorded before it started is
+    # not handed it again (as its `receive(seed=False)` was).
+    seed = False
+
     connections: Connections
     pairs: PairMap
     raw: edge.RawStore
@@ -286,7 +290,7 @@ class Lake:
     missing: dict[str, str] = field(default_factory=dict)
     #: Which of OANDA's currencies each subject is, by its record's ID; and
     #: the subjects whose record names none, until the pairs are read again.
-    subjects: dict[str, str] = field(default_factory=dict)
+    named: dict[str, str] = field(default_factory=dict)
     unnamed: set[str] = field(default_factory=set)
     #: Whether the deployment answers this plugin's ResolveInstrument (W3.6).
     reads_instruments: bool = True
@@ -308,7 +312,7 @@ class Lake:
 
     def __post_init__(self) -> None:
         self.wants = data.Wants(
-            self.plugin,
+            self,
             (DAILY, LIVE),
             clock_ns=self.clock_ns,
             latency=self.latency,
@@ -398,7 +402,7 @@ class Lake:
             return ""
         now = self.clock_ns()
         named = [meridian.Identifier(scheme="iso4217", value=code)]
-        found = await self.plugin.resolve_identifier(
+        found = await self.resolve_identifier(
             identifiers=named, as_of_ns=now, stated_asset_class="cash", stated_currency=code
         )
         if found.found and found.instrument_id:
@@ -406,7 +410,7 @@ class Lake:
             return self.ids[code]
         miss = found.miss_reason or ops.MISS_REASON_NOT_FOUND
         self.missing[code] = ops.MissReason.Name(miss)
-        await self.plugin.report_missing_instrument(
+        await self.report_missing_instrument(
             source=SOURCE,
             asset_class="cash",
             identifiers=named,
@@ -420,13 +424,13 @@ class Lake:
         """Which of OANDA's currencies a subject is: one resolved here, or read
         from its record's `iso4217` identifier (W3.6); empty where its record
         names none of them, or cannot be read."""
-        known = self.subjects.get(subject) or next(
+        known = self.named.get(subject) or next(
             (code for code, held in self.ids.items() if held == subject), ""
         )
         if known or subject in self.unnamed or not self.reads_instruments:
             return known
         try:
-            found = await self.plugin.resolve_instrument(
+            found = await self.resolve_instrument(
                 instrument_id=subject, as_of_ns=self.clock_ns()
             )
         except meridian.NotGranted:
@@ -447,7 +451,7 @@ class Lake:
         if not code:
             self.unnamed.add(subject)
             return ""
-        self.subjects[subject] = code
+        self.named[subject] = code
         return code
 
     async def serving(self, subjects: Iterable[str]) -> dict[str, list[Pair]]:
@@ -470,7 +474,7 @@ class Lake:
     async def venue_id(self) -> str:
         """The venue master's ID for OANDA, asked once per reading of its
         pairs; a venue not held reported once and left empty."""
-        return await self.venue.resolve(self.plugin, VENUE_IDENTIFIERS, SOURCE, self.clock_ns())
+        return await self.venue.resolve(self, VENUE_IDENTIFIERS, SOURCE, self.clock_ns())
 
     # ── Rows ─────────────────────────────────────────────────────────────
 
@@ -701,11 +705,11 @@ class Lake:
 
     # ── Wants ────────────────────────────────────────────────────────────
 
-    async def on_want(self, heard: Any) -> None:
+    async def on_observations_wanted(self, heard: Any) -> None:
         """Record what the lake wants, or decline it per subject."""
         await self.wants.hear(heard, self._answer)
 
-    async def on_withdrawn(self, heard: Any) -> None:
+    async def on_want_withdrawn(self, heard: Any) -> None:
         """A standing want withdrawn: its subjects no longer kept current, nor
         streamed unless another stands for them."""
         withdrawn = self.wants.withdraw(heard.message.want_id)
@@ -871,8 +875,12 @@ class Lake:
     ) -> None:
         """Keep the pricing stream open while anything stands on it, until
         cancelled: opened again when what stands on it, or the connection,
-        changes, and after a drop, waiting longer each time, a minute at most."""
-        wait = LIVE_EVERY_SECONDS
+        changes, and after a drop, waiting longer each time, a minute at most
+        (the SDK's `sessions.Backoff`, within its jitter: SDK 0.35, ruling
+        1027), and from the first wait again once it opens."""
+        backoff = sessions.Backoff(
+            first_s=LIVE_EVERY_SECONDS, most_s=MOST_WAIT_SECONDS, steady_s=0
+        )
         while True:
             connection = self.connection()
             instruments = sorted(self.streams)
@@ -892,7 +900,7 @@ class Lake:
                         if self.stream.state != "open":
                             self.stream.state = "open"
                             self.stream.opened += 1
-                            wait = LIVE_EVERY_SECONDS
+                            backoff.steady()
                         self.heard(stated, self.clock_ns())
                         if self._changed.is_set() or self._moved(connection):
                             break
@@ -912,8 +920,7 @@ class Lake:
             if self._changed.is_set() or self._moved(connection):
                 continue
             self.stream.state = "waiting"
-            await sleep(wait)
-            wait = min(wait * 2, MOST_WAIT_SECONDS)
+            await sleep(backoff.failed())
 
     def _reconnects(self) -> None:
         if self.latency is not None:
@@ -962,12 +969,18 @@ class Lake:
                 log.warning("keeping current stopped this time: %s", failed)
             await sleep(LIVE_EVERY_SECONDS)
 
+    async def run(self) -> None:
+        """The data role's work, until cancelled: each standing want kept
+        current and the pricing stream kept open (open-meridian 0.35:
+        `meridian.run` starts it again after a backoff should it fail)."""
+        await asyncio.gather(self.keep_current(), self.keep_streaming())
+
     # ── What the pages and the Summary read ──────────────────────────────
 
     def datasets_read(self) -> role_pairs.DatasetsRead:
         """Datasets' record (`read_datasets`), the SDK's for a venue listing
         pairs: each dataset, each want, and OANDA's pairs."""
-        named = set(self.subjects.values())
+        named = set(self.named.values())
         served = [
             p for p in self.pairs.pairs()
             if p.kind == CURRENCY and p.base in named and p.base in self.ids
@@ -982,7 +995,7 @@ class Lake:
             standing_wants=len(self.wants.standing),
             products_listed=sum(1 for p in self.pairs.pairs() if p.kind == CURRENCY),
             products_mapped=len(served),
-            subjects_named=len(self.subjects),
+            subjects_named=len(self.named),
             assets_not_resolved=sorted(self.missing),
             map_read_at=data.iso_time(self.pairs_read_ns),
             restated=self.wants.counts.restated,
