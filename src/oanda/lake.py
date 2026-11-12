@@ -9,8 +9,8 @@ quotes:
 - `live`: each pair's price as OANDA's pricing states it -- its best bid and
   ask with their liquidity, as a quote, and their mid as a price of kind
   `mid` -- from the pricing stream for a standing want, at most once a second
-  a pair, and from a price read now for a want of the latest. Kept, by its
-  default terms, for 90 days, the deployment's to change.
+  a pair, and from a price read now for a want of the latest. Kept as the
+  deployment's licence says.
 - `daily`: each pair's close, the mid of OANDA's daily candle, on OANDA's
   day ending at 17:00 New York; the day still forming restated under the
   same key as it fills.

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.9.0
+
+On open-meridian 0.36.0, contract 30, on core aae501d's harness (contract v30,
+chart 0.1.538).
+
+- **OANDA's terms in words** (ruling 1032): `licence_default` is gone from
+  the contract. `meridian plugin migrate --to 0.36.0` wrote `daily`'s licence
+  as words ("Kept by the lake; derived use not restricted; display
+  allowed.") and left `live`'s (its retention a name) by hand; each dataset
+  now describes OANDA Corporation's API License Agreement, August 2026
+  (`declared.TERMS`): a personal access token, practice or live; the rates
+  for internal use only, never redistributed, displayed or provided to a
+  third party, clients and customers included. The plugin declares no
+  licence: until a deployment admin sets one on Data sources, the lake keeps
+  the rows and reads every use right restrictively (90 days kept suits
+  `live`'s quarter of look-back).
+- **How a gap is recovered** (W10.14): `live` `stream_only` (OANDA keeps no
+  history of its quotes), `daily` `backfill` (its daily candles). No
+  sessions calendar: the FX week's (ruling 455) is not in the platform's
+  calendar master yet. No `most_shards`.
+- **Pins**: open-meridian 0.36.0 and its base by digest; meridian 0.1.60 in
+  the check workflow; core's runtime and harness at `aae501d`, by digest.
+
 ## 0.8.0
 
 On open-meridian 0.35.1, contract v29 (rulings 1001 to 1005 and 1009 to 1023:

@@ -61,9 +61,9 @@ code this plugin names it by.
 ## 5. Prices in the lake, only if a plugin reads them
 
 A deployment admin licenses the `live` and `daily` datasets and entitles
-the plugins that read them, on **Data sources**. Their default terms keep
-the rows (`live` for 90 days); the deployment admin confirms or changes
-them there, under OANDA's terms. **Manage → Datasets** then shows what each
+the plugins that read them, on **Data sources**, where each describes
+OANDA's terms in words and declares no licence: the deployment admin sets
+each licence there (`live` kept 90 days suits a quarter's look-back). **Manage → Datasets** then shows what each
 records and the wants it answers.
 
 ## Sample data

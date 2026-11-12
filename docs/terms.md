@@ -6,7 +6,12 @@ OANDA is a third party. A person trades and holds an account with OANDA
 under their own agreement with OANDA, and the use of OANDA's API is settled
 by the deployment admin: its terms are at
 [developer.oanda.com](https://developer.oanda.com). Read them before
-entering a token. Which broker a person may trade with is between that
+entering a token. OANDA Corporation's API License Agreement (August 2026)
+puts its rates to internal use only -- research, analysis and data
+processing by the account holder, or within its organisation -- and forbids
+redistributing, displaying or otherwise providing them to any third party,
+clients and customers included. Each of the plugin's datasets describes
+these terms in words on Data sources, and declares no licence. Which broker a person may trade with is between that
 person and the broker.
 
 This project is not affiliated with or endorsed by OANDA. Wherever the
@@ -27,8 +32,8 @@ practice account.
   each kind's window says, then archived, kept or deleted as an admin
   chooses on Settings.
 - OANDA's prices recorded in the lake are kept as the datasets' licences
-  say. Their defaults are not a statement of what OANDA's terms allow: the
-  deployment admin settles those on Data sources.
+  say, which the deployment admin sets on Data sources; until one is set,
+  the lake keeps the rows and reads every use right restrictively.
 
 ## Licence
 
