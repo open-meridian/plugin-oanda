@@ -30,7 +30,7 @@ env:
   # documentation-safe); 0.1.56 holds the suites of contract v29 and knows
   # SDK 0.35's shape. Locally `make check MERIDIAN_BIN=...` tries a build of
   # another.
-  MERIDIAN_VERSION: 0.1.56
+  MERIDIAN_VERSION: 0.1.60
 
 jobs:
   check:

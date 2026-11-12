@@ -15,13 +15,15 @@ for an Open Meridian deployment. The plugin holds three roles:
   lake's existing kinds, prices and quotes. `live`: each currency pair's
   best bid and ask with their liquidity, as a quote, and their mid, as a
   price of kind `mid`, from OANDA's pricing stream for a standing want, at
-  most once a second a pair, and from a price read now for the latest; kept
-  90 days by its default terms. `daily`: each pair's close, the mid of
+  most once a second a pair, and from a price read now for the latest, a
+  gap in it not fetched again (`stream_only`). `daily`: each pair's close, the mid of
   OANDA's daily candle, on its day ending at 17:00 New York (ruled
   2026-10-13: "later, in the same repository").
 
-Version 0.8.0 is built on open-meridian 0.35.1, contract v29: its work is
-one class for each role it holds, registered with `meridian.run`. From
+Version 0.9.0 is built on open-meridian 0.36.0, contract 30: each dataset
+describes OANDA's API License Agreement in words (`declared.TERMS`; ruling
+1032), declares no licence, and says how a gap in it is recovered. From
+contract v29: its work is one class for each role it holds, registered with `meridian.run`. From
 contract v28: its sessions' latency and feed delay reported, its quotes
 judged at the edge. From
 contract v27: one Connection for its data and connectivity roles, the SDK's, tabbed (ruling 457),

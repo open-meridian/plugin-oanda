@@ -23,27 +23,39 @@ catalogue"), of the lake's existing kinds, prices and quotes:
 
 - `live`: each pair's best bid and ask with their liquidity, as a quote, and
   their mid, as a price of kind `mid`, from OANDA's pricing: pulled for the
-  latest, or streamed for a standing want, at most once a second a pair. Its
-  default terms keep its rows 90 days, a quarter, for TCA's look-back
-  (spec/the-fx-and-multi-asset-sample-plugins §1.5); retention is the
-  deployment's to change on Data sources, within OANDA's terms.
+  latest, or streamed for a standing want, at most once a second a pair. A
+  quarter's rows (90 days) suit TCA's look-back
+  (spec/the-fx-and-multi-asset-sample-plugins §1.5): retention is the
+  deployment's licence's, set on Data sources.
 - `daily`: each pair's close, the mid of OANDA's daily candle, on its day
   ending at 17:00 New York (`day_time_zone` America/New_York,
-  `day_end_minute` 1020), OANDA's default alignment; pulled; kept.
+  `day_end_minute` 1020), OANDA's default alignment; pulled.
 
 Each declares no delay (`declared_delay_ns` 0, contract v27): OANDA serves
 its own prices in real time, the quotes it trades at, so each is judged
 against the staleness ceiling alone, never a delay beside it.
 
 Neither names a venue in the catalogue: each row names OANDA, the venue
-master's record for it (lake.py). Each licence is the default a
-deployment's licence confirms or replaces, never a statement of what
-OANDA's terms allow.
+master's record for it (lake.py).
+
+**Its terms and pricing** (contract 30, ruling 1032): no dataset declares a
+licence. Each describes OANDA's API License Agreement in plain words
+(`TERMS`): the rates for internal use only, never provided to a third
+party. The deployment admin sets the deployment's licence on Data sources,
+which is the one enforced.
+
+**How a gap is recovered** (W10.14): `live` is `stream_only` -- OANDA keeps
+no history of its quotes to read; `daily` is `backfill` -- OANDA's daily
+candles go back in time, and a want of a day or a range is answered from
+them. No sessions calendar: ruling 455 has the FX data plugins name the FX
+week's trading-sessions calendar, which the platform's calendar master does
+not hold yet (helpers.sessions.FX_WEEK holds it in the SDK meanwhile). No
+`most_shards`.
 """
 
 from __future__ import annotations
 
-from meridian import DatasetDeclaration, DatasetLicence
+from meridian import DatasetDeclaration
 from meridian.declaration import NotCarried, RecordKind
 
 from .settings import (
@@ -83,8 +95,16 @@ DAILY, LIVE = "daily", "live"
 #: OANDA's day: it ends at 17:00 New York.
 DAY_TIME_ZONE = "America/New_York"
 DAY_END_MINUTE = 17 * 60
-#: How long the live dataset's rows are kept by its default terms: a quarter.
-LIVE_RETENTION_DAYS = 90
+#: OANDA's terms, in plain words (contract 30, ruling 1032): OANDA
+#: Corporation's API License Agreement, August 2026.
+TERMS = (
+    "OANDA's v20 REST API, read with an OANDA account's personal access token, practice or "
+    "live. OANDA Corporation's API License Agreement (August 2026) puts its rates to internal "
+    "use only -- research, analysis and data processing by the account holder, or within its "
+    "organisation -- and forbids redistributing, displaying or otherwise providing them to "
+    "any third party, clients and customers included; copies only as needed, with OANDA's "
+    "notices kept. The prices are OANDA's own, the prices it deals at."
+)
 #: How far behind real time OANDA serves its prices (contract v27): not at
 #: all -- they are its own, the prices it trades at.
 DECLARED_DELAY_NS = 0
@@ -100,9 +120,8 @@ CATALOGUE = [
         modes=["pull", "stream"],
         cadence=1,
         history=0,
-        licence_default=DatasetLicence(
-            kept=True, retention_days=LIVE_RETENTION_DAYS, derived_use=True, display=True
-        ),
+        terms_and_pricing=TERMS,
+        gap_recovery="stream_only",
         day_time_zone=DAY_TIME_ZONE,
         day_end_minute=DAY_END_MINUTE,
         declared_delay_ns=DECLARED_DELAY_NS,
@@ -114,7 +133,8 @@ CATALOGUE = [
         modes=["pull"],
         cadence=86_400,
         history=0,
-        licence_default=DatasetLicence(kept=True, derived_use=True, display=True),
+        terms_and_pricing=TERMS,
+        gap_recovery="backfill",
         day_time_zone=DAY_TIME_ZONE,
         day_end_minute=DAY_END_MINUTE,
         declared_delay_ns=DECLARED_DELAY_NS,

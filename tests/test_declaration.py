@@ -49,8 +49,13 @@ def test_the_declaration_carries_its_pages_tools_and_documentation(
     assert sorted(catalogue) == ["daily", "live"]
     assert catalogue["live"]["data_types"] == ["meridian.v1.Price", "meridian.v1.Quote"]
     assert catalogue["daily"]["data_types"] == ["meridian.v1.Price"]
-    assert catalogue["live"]["licence_default"]["kept"] is True
-    assert catalogue["live"]["licence_default"]["retention_days"] == 90
+    # Contract 30 (ruling 1032): OANDA's terms in words, no licence declared;
+    # a gap in the live quotes is not fetched again, the daily candles are.
+    for dataset in catalogue.values():
+        assert "internal use only" in dataset["terms_and_pricing"]
+        assert "licence_default" not in dataset and "sessions_calendar_id" not in dataset
+    assert catalogue["live"]["gap_recovery"] == "stream_only"
+    assert catalogue["daily"]["gap_recovery"] == "backfill"
     sections = declared["documentation"]
     assert [section["name"] for section in sections] == SECTIONS
     for section in sections:

@@ -22,7 +22,8 @@ deployment entitles to read them. Two datasets:
   states beside each, as a quote, and their mid as a price. A pair kept
   current is recorded from OANDA's pricing stream, at most once a second.
   A price OANDA says is not tradeable (outside FX hours) is marked halted.
-  Its default terms keep the rows for 90 days.
+  How long the lake keeps its rows is your deployment's licence (90 days
+  suits a quarter's look-back); a gap in it is not fetched again.
 - **daily**: each pair's close, the mid of OANDA's daily candle, on OANDA's
   day ending at 17:00 New York. The day still forming is restated as it
   fills.
