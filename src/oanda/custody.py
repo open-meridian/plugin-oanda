@@ -59,10 +59,25 @@ Its first date is the account's opening (`history_from`).
 answer and the last good read is older than `stale_after_hours`; needs
 sign-in where OANDA refused the token (HTTP 401): a person makes a new one
 in OANDA's hub.
+
+**Within the plugin's share at its sidecar** (item 96, 2026-11-18). One
+read of the account at a time, each of its calls made after the last is
+answered, so the read holds one of the sidecar's `inFlight` places at most;
+asked to read while a read runs, it starts none, the one running covering
+it. A call the sidecar refuses for load the SDK waits out, taking its
+retry-after; past the SDK's waiting the read stops there, its rest carried
+to the next read and never sent twice: the statement's rows not yet
+recorded, sent to the statement opened (once core answers it already
+recorded), and the activity from the transaction it stopped at, those core
+already has not sent again. So does a call that timed out or found no
+handler, and an account no longer linked. Any other refusal of a row or an
+activity is said and passed over, as before. What is carried is held in
+this process.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -98,6 +113,21 @@ ROLLING = (
 )
 VALUE_DATE = "the pair's spot date for the read's moment, from the date read (ComputeDate)"
 NO_INSTITUTION = "OANDA's v20 account names no institution: the connection's, OANDA"
+
+
+def carried(failed: meridian.MeridianError) -> bool:
+    """Whether a refusal leaves the rest of a read to the next, rather than
+    passing over what it refused: the sidecar's refusal for load
+    (RESOURCE_EXHAUSTED, which the SDK raises from the sidecar's own answer
+    once its waiting is past), a call that timed out or found no handler,
+    and an account no longer linked. None of these says the record itself
+    is refused."""
+    if isinstance(failed, meridian.NotLinked):
+        return True
+    code = getattr(failed.__cause__, "code", None)
+    if callable(code) and getattr(code(), "name", "") == "RESOURCE_EXHAUSTED":
+        return True
+    return isinstance(failed, meridian.CallFailed) and failed.kind in ("timeout", "no handler")
 
 
 def _number(value: Any) -> Decimal | None:
@@ -324,7 +354,8 @@ class Status:
 
 
 class Syncer:
-    """One read of the account at a time, and what it found. `role` is the
+    """One read of the account at a time, and what it found (see the
+    module: within the plugin's share at its sidecar). `role` is the
     custody role's class its acts are made through (open-meridian 0.35), or
     the suite's `Recorder` in its tests; the plugin-wide items (raw records,
     what is not carried, health) through its `plugin`."""
@@ -354,8 +385,22 @@ class Syncer:
         self._since: dict[str, str] = {}
         self._cash: dict[tuple[str, bool], str] = {}
         self._said: set[str] = set()
+        self._reading = asyncio.Lock()
+        # What a read stopped for load left to the next, by account: the
+        # statement opened and how many of its rows landed, and the
+        # activities core has of the transaction it stopped at.
+        self._rows_landed: dict[str, tuple[str, int]] = {}
+        self._landed: dict[str, set[str]] = {}
 
     async def run_once(self) -> Status:
+        """Read the account, unless a read is running: that one covers it,
+        and what it does not finish is carried to the next."""
+        if self._reading.locked():
+            return self.status
+        async with self._reading:
+            return await self._read()
+
+    async def _read(self) -> Status:
         connection = self.connections.current
         if connection is None:
             self.status = Status(waiting_for=self.connections.config.missing)
@@ -621,7 +666,9 @@ class Syncer:
         key: str,
     ) -> None:
         as_of_ns = moments.of(now)
-        statement_id = f"{connection.account_id}:{account.get('lastTransactionID', '')}"
+        account_id = connection.account_id
+        statement_id = f"{account_id}:{account.get('lastTransactionID', '')}"
+        opened_id = ""
         try:
             instruments = [await self._resolve(row, as_of_ns, now) for row in rows]
             figures = []
@@ -638,35 +685,50 @@ class Syncer:
             opened = await self._role.record_holdings_statement(
                 source=SOURCE,
                 external_statement_id=statement_id,
-                external_account_id=connection.account_id,
+                external_account_id=account_id,
                 institution=INSTITUTION,
                 as_of_date=self.status.as_of,
                 read_at_ns=as_of_ns,
                 expected_rows=len(rows),
                 figures=figures,
-                raw_record=self._role.plugin.raw_record(
-                    f"{connection.account_id}/{key}/account"
-                ),
+                raw_record=self._role.plugin.raw_record(f"{account_id}/{key}/account"),
                 provenance=[derived("institution", NO_INSTITUTION)],
             )
-            self.status.statement_id = opened.statement_id
-            if opened.already_recorded:
-                return
-            for row, instrument in zip(rows, instruments, strict=True):
+            opened_id = self.status.statement_id = opened.statement_id
+            # Where a read stopped for load left this statement, the rows it
+            # did not record; a statement core had already, otherwise, none.
+            held, landed = self._rows_landed.get(account_id, ("", 0))
+            if held != opened_id:
+                if opened.already_recorded:
+                    return
+                landed = 0
+            for at, (row, instrument) in enumerate(zip(rows, instruments, strict=True)):
+                if at < landed:
+                    continue
+                self._rows_landed[account_id] = (opened_id, at)
                 await self._role.record_holding(
-                    statement_id=opened.statement_id,
-                    external_account_id=connection.account_id,
+                    statement_id=opened_id,
+                    external_account_id=account_id,
                     side="HOLDING_SIDE_LONG",
                     quantity=row.quantity,
-                    raw_record=self._role.plugin.raw_record(
-                        f"{connection.account_id}/{key}/account"
-                    ),
+                    raw_record=self._role.plugin.raw_record(f"{account_id}/{key}/account"),
                     **self._split(row),
                     **instrument,
                 )
+            self._rows_landed.pop(account_id, None)
+        except asyncio.CancelledError:
+            # A row whose call was cut off may have landed: never sent again,
+            # since a row sent twice is recorded twice.
+            if opened_id:
+                self._rows_landed.pop(account_id, None)
+            raise
         except meridian.MeridianError as refused:
             self.status.error = str(refused)
-            log.warning("the statement for %s stopped: %s", connection.account_id, refused)
+            if carried(refused):
+                raise
+            if opened_id:
+                self._rows_landed.pop(account_id, None)
+            log.warning("the statement for %s stopped: %s", account_id, refused)
 
     def _split(self, row: Row) -> dict[str, Any]:
         """A row's settled quantity and what is pending by value date, each
@@ -700,10 +762,16 @@ class Syncer:
     async def _activities(
         self, connection: Connection, transactions: list[Json], home: str, now: datetime
     ) -> int:
+        """Each transaction's activities sent, in OANDA's order, the account
+        read from after each once it is done; a refusal `carried` stops
+        here, raised, and the next read carries on from this transaction."""
         sent = 0
+        account_id = connection.account_id
+        landed = self._landed.setdefault(account_id, set())
         for transaction in transactions:
             converted = activities_of(transaction, home)
             if not converted:
+                self._done(account_id, transaction)
                 continue
             kind = str(transaction.get("type") or "")
             if kind == "ORDER_FILL":
@@ -724,6 +792,8 @@ class Syncer:
                 else f"activity/{connection.account_id}/{transaction.get('id')}"
             )
             for each in converted:
+                if each.external_activity_id in landed:
+                    continue
                 instrument: dict[str, Any] = {}
                 if each.code:
                     pair = self._pairs.get(each.instrument) if each.instrument else None
@@ -759,10 +829,13 @@ class Syncer:
                     log.warning(
                         "activity %s was not recorded: %s", each.external_activity_id, refused
                     )
-                    if isinstance(refused, meridian.NotLinked):
-                        return sent
+                    if carried(refused):
+                        self.status.error = str(refused)
+                        raise
                     continue
+                landed.add(each.external_activity_id)
                 sent += 1
+            self._done(account_id, transaction)
         if transactions:
             log.info(
                 "%s: %d activities sent from %d transactions",
@@ -771,6 +844,14 @@ class Syncer:
                 len(transactions),
             )
         return sent
+
+    def _done(self, account_id: str, transaction: Json) -> None:
+        """A transaction's activities all sent or passed over: the account
+        is read from after it."""
+        said = str(transaction.get("id") or "")
+        if said:
+            self._since[account_id] = said
+        self._landed.setdefault(account_id, set()).clear()
 
     # ── The Summary ─────────────────────────────────────────────────────
 
