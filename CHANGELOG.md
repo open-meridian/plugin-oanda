@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.9.1
+
+Within the plugin's share at its sidecar (item 96): core's sidecar admits 16
+of a plugin's calls at once (`sidecar.limits.inFlight`) and refuses the rest
+for load.
+
+- **Each loop once.** A role class's `run()` ran its loops with
+  `asyncio.gather`, which leaves the others running when one fails, and
+  `meridian.run` starts a failed `run()` again: once the account scope's
+  stream ended (a sidecar restarted, say), each restart, a minute apart at
+  most, left one more read of the account running beside the last, and that
+  stream was never opened again, so every restart failed at once. Each class
+  now runs its loops `together`: one failing cancels the rest, and the
+  account scope's stream is opened again on each start.
+- **One read of the account at a time**, each of its calls after the last
+  is answered: it holds one place at the sidecar at most, leaving the rest
+  to the pages and tools, the price writes and trading. Asked to read while
+  one runs, it starts none.
+- **A read stopped for load is carried, never doubled.** Past the SDK's
+  waiting out of a refusal for load (its retry-after), the read stops; the
+  next sends the statement's rows not yet recorded and the activity from
+  the transaction it stopped at, none core has sent again. Before, a row
+  refused left its statement open for good and an activity refused was
+  passed over. A call that timed out or found no handler, and an account no
+  longer linked, are carried the same way.
+
 ## 0.9.0
 
 On open-meridian 0.36.0, contract 30, on core aae501d's harness (contract v30,

@@ -20,6 +20,11 @@ for an Open Meridian deployment. The plugin holds three roles:
   OANDA's daily candle, on its day ending at 17:00 New York (ruled
   2026-10-13: "later, in the same repository").
 
+Version 0.9.1 keeps the plugin within its share at its sidecar
+(`sidecar.limits.inFlight`): one read of the account at a time, each of its
+loops once however often a class is started again, and a read stopped for
+load carried to the next, never sent twice.
+
 Version 0.9.0 is built on open-meridian 0.36.0, contract 30: each dataset
 describes OANDA's API License Agreement in words (`declared.TERMS`; ruling
 1032), declares no licence, and says how a gap in it is recovered. From

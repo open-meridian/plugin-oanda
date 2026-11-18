@@ -47,7 +47,7 @@ import dataclasses
 import logging
 from collections.abc import AsyncIterator, Coroutine
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import meridian
 from meridian import edge, roles
@@ -73,6 +73,25 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+async def together(*work: Coroutine[Any, Any, None]) -> None:
+    """Each of `work` run at once until each ends or one raises, and then
+    none left running: a failure is raised once the rest are cancelled, and
+    so is a cancellation. `asyncio.gather` would leave the rest running, and
+    `meridian.run`, starting a failed run() again, would start each of them
+    once more beside the last (item 96: a read of the account for every
+    restart, at the sidecar together)."""
+    tasks = [asyncio.ensure_future(each) for each in work]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        for task in tasks:
+            if task.done() and not task.cancelled() and task.exception() is not None:
+                raise cast(BaseException, task.exception())
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def bound(role: Any) -> bool:
     """Whether the instance holds `role`'s role: `meridian.run` registers a
     class only for a role the instance was launched with."""
@@ -95,7 +114,7 @@ class Custody(custody.Role):
         await self.shared.started(self)
 
     async def run(self) -> None:
-        await asyncio.gather(*self.shared.hosted(self))
+        await together(*self.shared.hosted(self))
 
 
 class Trading(Trader):
@@ -107,7 +126,7 @@ class Trading(Trader):
         await self.shared.started(self)
 
     async def run(self) -> None:
-        await asyncio.gather(super().run(), *self.shared.hosted(self))
+        await together(super().run(), *self.shared.hosted(self))
 
 
 @dataclasses.dataclass(eq=False)
@@ -120,7 +139,7 @@ class Data(Lake):
         await self.shared.started(self)
 
     async def run(self) -> None:
-        await asyncio.gather(super().run(), *self.shared.hosted(self))
+        await together(super().run(), *self.shared.hosted(self))
 
 
 class Oanda:
@@ -235,15 +254,27 @@ class Oanda:
         return kept
 
     async def _watch_links(self) -> None:
-        assert self._scopes is not None
-        async for scope in self._scopes:
-            await self.links.hold(scope)
+        """The account scope followed: on the stream the first class's start
+        opened, and each time this starts again on a stream of its own, the
+        last having ended."""
+        assert self._host is not None
+        scopes = self._scopes or self._host.plugin.account_scope()
+        self._scopes = None
+        try:
+            async for scope in scopes:
+                await self.links.hold(scope)
+        finally:
+            close = getattr(scopes, "aclose", None)
+            if close is not None:
+                await close()
         raise ConnectionError("the account scope's stream ended")
 
     async def _poll(self) -> None:
         """The accounts the token reaches, for Connections to pick from, and
         with custody the account read, on every poll and every settings
-        change; storage tended after each."""
+        change; storage tended after each. One of these runs: the classes'
+        run() is `together`'s. A read stopped for load waits for the next
+        poll, what it left carried (custody.py)."""
         syncer = self.syncer
         while True:
             self.wake.clear()
