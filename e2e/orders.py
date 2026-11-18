@@ -6,7 +6,9 @@ or live, is reached.
 
 1. Set up: the synthetic OANDA's clock set to the coming Tuesday at 12:00
    New York (decision 66), so its fills trade on a Tuesday and its roll is
-   that day's 17:00, whatever day the e2e runs; an account for the orders,
+   that day's 17:00, whatever day the e2e runs -- the first such Tuesday
+   whose spot date is not Wednesday's on the harness's own calendars, so
+   the roll has a date to move to; an account for the orders,
    the desk's grants on it, EUR's and USD's cash instruments named; OANDA made available and linked to the
    desk, the account mapped to the synthetic account's code; trading
    enabled on the connection under the connectivity role's admin (a new
@@ -56,6 +58,9 @@ WORKS = "1000000"
 # EUR's cash instrument as `store book` prints it: the platform's record by
 # its INS- ID (contract v24's one-ID model), the harness's published format.
 EUR_IN_BOOK = "INS-01JEUR00000000000000000001"
+USD_IN_BOOK = "INS-01JUSD00000000000000000001"
+WEEKDAYS = {f"WEEKDAY_{name}": n for n, name in enumerate(
+    ("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"))}
 
 
 class Failed(Exception):
@@ -187,16 +192,66 @@ def oanda_orders():
     return json.loads(said.strip().splitlines()[-1])
 
 
+def spot_rule():
+    """EUR/USD's spot-date rule and the calendars it names, as the harness's
+    platform serves them (GET /api/v1/reference/calendars)."""
+    url = ("http://127.0.0.1:8000/api/v1/reference/calendars?kind=DATE_RULE_KIND_SPOT"
+           f"&pair={EUR_IN_BOOK}&pair={USD_IN_BOOK}")
+    said = compose(
+        "exec", "-T", "platform", "python", "-c",
+        "import sys, urllib.request; print(urllib.request.urlopen(sys.argv[1]).read().decode())",
+        url,
+    ).stdout
+    return json.loads(said.strip().splitlines()[-1])
+
+
+def spot_date(trade_day, served):
+    """A trade day's spot date by `served`'s rule: its lag in days open on
+    the counting calendars, then the first day open on every spot calendar,
+    modified following (back within the month where following leaves it)."""
+    (rule,) = [each["spot"] for each in served["rules"]]
+    calendars = {each["calendar_id"]: each for each in served["calendars"]}
+
+    def open_on(day, named):
+        for calendar_id in named:
+            held = calendars[calendar_id]
+            weekend = {WEEKDAYS[w] for each in held.get("weekends", []) for w in each["weekdays"]}
+            closed = {d["date"] for d in held.get("days", [])
+                      if d.get("kind") == "CALENDAR_DAY_KIND_CLOSED"}
+            if day.weekday() in weekend or day.isoformat() in closed:
+                return False
+        return True
+
+    day, counted = trade_day, 0
+    while counted < int(rule["lag_days"]):
+        day += timedelta(days=1)
+        counted += open_on(day, rule["counting_calendars"])
+    step = timedelta(days=1)
+    good = day
+    while not open_on(good, rule["spot_calendars"]):
+        good += step
+    if good.month != day.month:
+        good = day
+        while not open_on(good, rule["spot_calendars"]):
+            good -= step
+    return good
+
+
 def controlled_clock(now=None):
     """The moment the synthetic OANDA's clock is set to (decision 66): the
     coming Tuesday at 12:00 New York, strictly after now, so a clock is only
-    set forward. Its fills trade that Tuesday, spot Thursday; its roll at
-    17:00 moves them to Wednesday's spot date, Friday, the same every run."""
+    set forward. Its fills trade that Tuesday; its roll at 17:00 moves them
+    to Wednesday's spot date. A week where the two coincide -- a holiday on
+    the harness's calendars, Thanksgiving's Thursday, say -- leaves nothing
+    to roll, so the Tuesday after it is taken instead, as often as needed."""
     new_york = ZoneInfo("America/New_York")
     now = now or datetime.now(new_york)
     day = now.date() + timedelta(days=(1 - now.weekday()) % 7)
     at = datetime.combine(day, clock_time(12), new_york)
     if at <= now:
+        at += timedelta(days=7)
+    served = spot_rule()
+    while spot_date(at.date(), served) == spot_date(at.date() + timedelta(days=1), served):
         at += timedelta(days=7)
     return at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
