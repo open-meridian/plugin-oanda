@@ -56,9 +56,23 @@ takes up where it left off.
   `request unanswered`, and is resolved by asking OANDA for the order by its
   client ID (`GET .../orders/@<placement>`), never by sending it again (the
   order-path plan's Q17). Before every send the placement is noted in
-  storage (`Sent`), so a placement the book still holds queued after a
-  restart is asked about, never sent twice. An order state the mapping does
-  not know is outcome unknown, `venue status not mapped`, as reported.
+  storage, as the SDK's Trader notes it (`connectivity.Sent`, open-meridian
+  0.37.0): a marker of its own, `state/sent/<placement>`, created
+  exclusively, so a placement the book still holds queued after a restart
+  is asked about, never sent twice, and of two pods inside a takeover's
+  lapse -- the deposed holder still sending, the one that took its shard
+  reading the book -- only the one that made the marker sends it. The
+  `state/sent.json` an earlier release wrote whole is read, never written
+  again. An order state the mapping does not know is outcome unknown,
+  `venue status not mapped`, as reported.
+
+**Its files** (open-meridian 0.37.0): what it sent, the transactions taken,
+the trades, the fills waiting and the roll's state are read from storage
+once the plugin registered (`open`), from the class's start: on an instance
+run as shards or with a standby pod its storage is the shard's own folder,
+known only then. Stopped -- its sidecar lost, or deposed -- it forgets what
+it held of the book (`on_stop`), and admitted again reads its files and the
+book afresh.
 
 **The value-date roll** (contract v23, W11.25; the spot-FX plugin's Q3,
 ruled 2026-10-13). A fill moves the book's two cash positions pending to the
@@ -158,6 +172,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, TypeVar
 
 import meridian
@@ -168,7 +183,7 @@ from meridian.roles import connectivity
 from . import moments
 from .connection import Connection
 from .declared import seen_in_fill
-from .kept import Kept
+from .kept import Kept, file_in
 from .pairs import PairMap
 from .raw import CANCEL, OFFERED, ORDER, PLACE, REPLACE, STREAMED, RawStore, call, failed
 from .venue import Json, VenueError, as_json
@@ -312,22 +327,6 @@ def basis_of(basis: ops.DateBasis) -> meridian.DateBasis:
     )
 
 
-class Sent:
-    """The placements sent to OANDA, noted in storage before each send, so a
-    restart never sends one twice (Q17)."""
-
-    def __init__(self, kept: Kept) -> None:
-        self._kept = kept
-
-    def __contains__(self, placement_id: object) -> bool:
-        return placement_id in self._kept.value
-
-    def note(self, placement_id: str) -> None:
-        if placement_id not in self._kept.value:
-            self._kept.value.append(placement_id)
-            self._kept.save()
-
-
 @dataclass
 class Worked:
     """A placement OANDA holds an order for, as this plugin works it."""
@@ -392,11 +391,6 @@ class Trader(connectivity.Role):
         pairs: PairMap,
         raw: RawStore | None = None,
         secrets: Callable[[], Sequence[str]] = lambda: (),
-        sent: Kept | None = None,
-        cursor: Kept | None = None,
-        trades: Kept | None = None,
-        waiting: Kept | None = None,
-        rolling: Kept | None = None,
         scope: Callable[[], meridian.AccountScope] = meridian.AccountScope,
         latency: Any = None,
         poll_seconds: Callable[[], int] = lambda: POLL_SECONDS,
@@ -414,18 +408,9 @@ class Trader(connectivity.Role):
         self._secrets = secrets
         self._scope = scope
         self._poll_seconds = poll_seconds
-        self._sent = Sent(sent if sent is not None else Kept(None, []))
-        # The last transaction taken, by account.
-        self._cursor = cursor if cursor is not None else Kept(None, {})
-        # Each trade a placement's fill opened, and each charge reported.
-        self._trades = trades if trades is not None else Kept(None, {})
-        # Fills waiting for their value date, as OANDA stated them.
-        self._waiting = waiting if waiting is not None else Kept(None, [])
-        # The value-date roll's state (contract v23): by pair, the pending
-        # dates its fills and rolls left in the book and OANDA's latest roll;
-        # the venue-originated fills and their trades' charges; the charges
-        # of a trade whose opening fill waits; the rolls waiting for a date.
-        self._rolling = rolling if rolling is not None else Kept(None, {})
+        # Its files, held in memory until it is opened on its storage once
+        # registered (`open`).
+        self.open(None)
         self.instructions: dict[tuple[Any, ...], ops.TradingInstruction] = {}
         self.working: dict[str, Worked] = {}
         self.held: dict[str, ops.Placement] = {}
@@ -456,6 +441,42 @@ class Trader(connectivity.Role):
     def me(self) -> str:
         """This instance's ID, as placements name their connectivity."""
         return str(self.plugin.identity.instance_id)
+
+    def open(self, storage: Path | None) -> None:
+        """Its files read from `storage`, the plugin's storage once it
+        registered -- on an instance run as shards or with a standby pod,
+        its shard's own folder (open-meridian 0.37.0) -- or held in memory
+        where none is granted. Read again each time it is registered."""
+        # The placements sent, each a marker of its own beside
+        # `state/sent.json`, which an earlier release wrote whole and is read
+        # as it stands (the SDK's `Sent`, as its Trader keeps them).
+        self._sent = connectivity.Sent(file_in(storage, "sent.json"))
+        # The last transaction taken, by account.
+        self._cursor = Kept(file_in(storage, "cursor.json"), {})
+        # Each trade a placement's fill opened, and each charge reported.
+        self._trades = Kept(file_in(storage, "trades.json"), {})
+        # Fills waiting for their value date, as OANDA stated them.
+        self._waiting = Kept(file_in(storage, "waiting.json"), [])
+        # The value-date roll's state (contract v23): by pair, the pending
+        # dates its fills and rolls left in the book and OANDA's latest roll;
+        # the venue-originated fills and their trades' charges; the charges
+        # of a trade whose opening fill waits; the rolls waiting for a date.
+        self._rolling = Kept(file_in(storage, "rolling.json"), {})
+
+    async def on_stop(self) -> None:
+        """Stopped -- its sidecar lost, or deposed, or the plugin stopping:
+        what it held of the book is forgotten, so that admitted again it
+        reads its files (`open`) and the book (`start`) afresh rather than
+        work on what it knew when deposed."""
+        self.started = False
+        self.working.clear()
+        self.held.clear()
+        self.decided.clear()
+        self.outside.clear()
+        self.instructions.clear()
+        self.published.clear()
+        self.watermark = None
+        await super().on_stop()
 
     # ── Latency (contract v27) ──────────────────────────────────────────
 
@@ -791,12 +812,9 @@ class Trader(connectivity.Role):
         if order is None:
             return
         if pid in self._sent:
-            # Sent before this process: asked about, never sent again.
-            worked = await self._worked(placement, order)
-            if worked is not None:
-                worked.unanswered = True
-                self.working[pid] = worked
-                self.decided.add(pid)
+            # Sent before this process, or by another pod: asked about, never
+            # sent again.
+            await self._sent_before(placement, order)
             return
         self.decided.add(pid)
         why, worked = await self._decide(connection, placement, order)
@@ -804,7 +822,12 @@ class Trader(connectivity.Role):
             await self._reject_unsupported(connection, placement, why)
             return
         body = self._body(placement, order, worked, worked.placement_id)
-        self._sent.note(pid)
+        if not self._sent.note(pid):
+            # Another pod noted it first on the shard's folder -- a
+            # takeover's lapse, the deposed holder still sending: its note
+            # alone may send it. Asked about, never sent again.
+            await self._sent_before(placement, order)
+            return
         self.working[pid] = worked
         try:
             answer = await self._timed(
@@ -820,6 +843,16 @@ class Trader(connectivity.Role):
             return
         raw = self._keep(connection, [call(PLACE, answer, _note(body))], "place")
         await self._answered(connection, worked, answer, raw)
+
+    async def _sent_before(self, placement: ops.Placement, order: ops.Order) -> None:
+        """A placement noted as sent, by an earlier process or another pod:
+        its order asked for at OANDA by its client ID each poll, never sent
+        again."""
+        worked = await self._worked(placement, order)
+        if worked is not None:
+            worked.unanswered = True
+            self.working[placement.placement_id] = worked
+            self.decided.add(placement.placement_id)
 
     async def _decide(
         self, connection: Connection, placement: ops.Placement, order: ops.Order

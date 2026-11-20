@@ -20,6 +20,15 @@ for an Open Meridian deployment. The plugin holds three roles:
   OANDA's daily candle, on its day ending at 17:00 New York (ruled
   2026-10-13: "later, in the same repository").
 
+Version 0.10.0 is built on open-meridian 0.37.0: a placement is sent at
+most once across a takeover, each noted as a marker of its own
+(`state/sent/<placement>`, the SDK's `connectivity.Sent`), and the plugin
+reads its storage once registered -- on an instance run as shards or with a
+standby pod, the shard's own folder -- and afresh each time it is registered
+again. The `state/sent.json` 0.9.1 and earlier wrote is read as it stands.
+Once on 0.10.0, an instance is never rolled back below it: an earlier
+release would not see the markers, and could send a placement again.
+
 Version 0.9.1 keeps the plugin within its share at its sidecar
 (`sidecar.limits.inFlight`): one read of the account at a time, each of its
 loops once however often a class is started again, and a read stopped for

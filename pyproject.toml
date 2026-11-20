@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oanda"
-version = "0.9.1"
+version = "0.10.0"
 description = "Spot FX through OANDA's v20 API for an Open Meridian deployment: orders placed and filled, the account's positions, cash and activity, and OANDA's prices in the lake"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"

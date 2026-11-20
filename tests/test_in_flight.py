@@ -232,6 +232,8 @@ def custody_plugin(
     monkeypatch.setenv(edge.STORAGE_DIR, str(storage))
     shared = Oanda()
     shared.custody._bind(plugin)
+    # Registered: its storage read, as the first settings would.
+    shared.open_storage()
     shared.connections.configure(Config(synthetic=True, poll_seconds=0))
     listed = many_accounts(accounts)
     venue = shared.connections.synthetic_venue

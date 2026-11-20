@@ -228,7 +228,6 @@ class TradeRig:
         self.executions: list[ops.Execution] = []
         self.minted = 0
         self.charged = 0
-        self.kept: dict[str, Kept] = {}
         recorder.answer("ListOrders", self._listed)
         recorder.answer("ResolveInstrument", self._instrument)
         recorder.answer("ResolveIdentifier", resolved)
@@ -248,33 +247,31 @@ class TradeRig:
         )
 
     def make(self) -> Trader:
-        """A trader as a process started now makes one: what it keeps read
-        again from storage."""
-        empties: dict[str, Any] = {
-            "sent": [],
-            "cursor": {},
-            "trades": {},
-            "waiting": [],
-            "rolling": {},
-        }
-        self.kept = {
-            name: Kept(self.storage / "state" / f"{name}.json", empty)
-            for name, empty in empties.items()
-        }
-        return self.recorder.bind(
+        """A trader as a process registered now makes one: what it keeps read
+        again from storage (`open`, from its class's start once
+        registered)."""
+        trader = self.recorder.bind(
             Trader(
                 self.connection,
                 now=self.clock,
                 pairs=self.pairs,
                 raw=self.raw,
-                sent=self.kept["sent"],
-                cursor=self.kept["cursor"],
-                trades=self.kept["trades"],
-                waiting=self.kept["waiting"],
-                rolling=self.kept["rolling"],
                 latency=self.latency,
             )
         )
+        trader.open(self.storage)
+        return trader
+
+    @property
+    def kept(self) -> dict[str, Kept]:
+        """The trader's files written whole, by name."""
+        trader = self.trader
+        return {
+            "cursor": trader._cursor,
+            "trades": trader._trades,
+            "waiting": trader._waiting,
+            "rolling": trader._rolling,
+        }
 
     def _instrument(self, params: ops.ResolveInstrumentParams) -> ops.ResolveInstrumentResult:
         for code in ("EUR", "USD", "JPY", "GBP", "CAD"):
