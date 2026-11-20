@@ -176,9 +176,19 @@ class Connections:
         now: Callable[[], datetime],
         make_venue: Callable[[str, str], Venue] = Oanda,
     ) -> None:
-        self._storage = storage
         self._now = now
         self._make_venue = make_venue
+        self._real: tuple[tuple[str, str], Venue] | None = None
+        self._listing: tuple[tuple[str, ...], Listing] | None = None
+        self.config = Config()
+        self.open(storage)
+
+    def open(self, storage: Path | None) -> None:
+        """Its files read from `storage`, the plugin's storage once it
+        registered (on a shard of its instance, the shard's own folder), or
+        held in memory where none is granted; the synthetic OANDA's state
+        read again from there when next asked for."""
+        self._storage = storage
         self._enabled = Kept(file_in(storage, "connections.json"), {})
         self._chosen = Kept(file_in(storage, "account.json"), {})
         # The connection last in use, so a change found after a restart is
@@ -186,9 +196,6 @@ class Connections:
         self._in_use = Kept(file_in(storage, "in-use.json"), {})
         self._turned_off = Kept(file_in(storage, "trading-off.json"), [])
         self._synthetic: synthetic.SyntheticOanda | None = None
-        self._real: tuple[tuple[str, str], Venue] | None = None
-        self._listing: tuple[tuple[str, ...], Listing] | None = None
-        self.config = Config()
 
     def configure(self, config: Config) -> None:
         self.config = config

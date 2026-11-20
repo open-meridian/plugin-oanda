@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.10.0
+
+On open-meridian 0.37.0 (`meridian plugin migrate --to 0.37.0`: the SDK,
+the base image by digest and `meridian` 0.1.61 in the check). A minor
+version: what it keeps in storage changes form, and an instance on it is
+never rolled back below it.
+
+- **A placement sent at most once across a takeover.** Each placement is
+  noted before its send as the SDK's Trader notes it, `connectivity.Sent`: a
+  marker of its own, `state/sent/<placement>`, created exclusively. Of two
+  pods on one shard's folder inside a takeover's lapse -- the deposed holder
+  mid-send, the pod that took the shard reading the book, which still holds
+  the placement queued -- only the one that made the marker sends; the other
+  asks OANDA for the order by its client ID, as after a restart. Before,
+  each pod held the placements sent as a list read once when its process
+  started, and the second sent it again.
+- **The `state/sent.json` 0.9.1 and earlier wrote** is read as it stands
+  and never written again, so no placement sent before the upgrade is sent
+  after it. The other trading files (`cursor`, `trades`, `waiting`,
+  `rolling`) keep their place and form.
+- **Storage read once registered.** The connection's files, the pair map,
+  the raw records and the trading files were read when the process started,
+  before it registered; on an instance run as shards or with a standby pod
+  that is the storage's root, which the SDK now refuses. They are read at
+  the first settings, after Register, from the shard's own folder, and read
+  afresh when the plugin is registered again, as the same shard or
+  another; stopped, the Trader forgets what it held of the book and reads
+  it again on start.
+- OANDA's trading stays its own Trader over the account's transactions
+  (fills by transaction, financing and value-date rolls), now on the SDK's
+  markers; the SDK's `connectivity.Trader` reads fills from a venue's
+  orders, which OANDA's fills, rolls and financing do not fit.
+
 ## 0.9.1
 
 Within the plugin's share at its sidecar (item 96): core's sidecar admits 16

@@ -84,6 +84,11 @@ class PairMap:
     """The pair map, kept in `file` where storage is granted."""
 
     def __init__(self, file: Path | None = None) -> None:
+        self.open(file)
+
+    def open(self, file: Path | None) -> None:
+        """The map read from `file`, in the plugin's storage once it
+        registered, or held in memory where it is None."""
         self._file = file
         self._pairs: dict[str, Pair] = {}
         if file is not None and file.exists():

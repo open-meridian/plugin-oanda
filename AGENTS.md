@@ -74,8 +74,9 @@ OANDA as a partner: it is a vendor whose published API the plugin uses.
   this plugin's.
 - **Trading** (`trading.py`) acts on a placement naming its own instance and
   no other; sends it only through `venue.py`, the placement's ID as the
-  order's client extension ID; notes each send in storage first (`Sent`), so
-  a restart never sends twice and an unanswered send is asked about by its
+  order's client extension ID; notes each send in storage first, a marker
+  of its own made exclusively (the SDK's `connectivity.Sent`, from 0.10.0),
+  so a restart never sends twice, nor two pods inside a takeover's lapse, and an unanswered send is asked about by its
   client ID, never resent; takes facts from the account's transactions (the
   stream, and `sinceid` on every poll, the cursor in storage); tells a cancel
   from a replace by the placement's change request; honours pause and stop;

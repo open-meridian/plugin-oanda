@@ -23,7 +23,11 @@ stream. As `data` (from 0.5.0) it records OANDA's prices in the lake
 (lake.py): what the lake wants, and each standing want kept current from
 the pricing stream. What OANDA answered is kept as raw records in the
 storage the deployment grants (raw.py, and the SDK's store for the data
-role's), and moved past each kind's window (archive.py). From 0.6.0 its
+role's), and moved past each kind's window (archive.py). From 0.10.0
+(open-meridian 0.37.0) its storage is read once registered, before the
+first settings are applied (`Oanda.open_storage`) -- on an instance run as
+shards or with a standby pod the shard's own folder, known only then -- and
+read afresh each time it is registered again. From 0.6.0 its
 sessions' latency -- the pricing stream's and the order calls' -- is
 recorded on one `meridian.roles.Latency` and shown on Connection's
 Sessions; core receives ReportLatency from contract v28 (ruling 515), so
@@ -57,7 +61,6 @@ from .archive import Keeper
 from .connection import Connections
 from .custody import Syncer
 from .declaration import DECLARATION, PORT
-from .kept import Kept, file_in
 from .lake import Lake
 from .linking import Links, failure
 from .page import Held, hold, pages
@@ -113,6 +116,10 @@ class Custody(custody.Role):
     async def on_start(self) -> None:
         await self.shared.started(self)
 
+    async def on_stop(self) -> None:
+        self.shared.stopped()
+        await super().on_stop()
+
     async def run(self) -> None:
         await together(*self.shared.hosted(self))
 
@@ -124,6 +131,10 @@ class Trading(Trader):
 
     async def on_start(self) -> None:
         await self.shared.started(self)
+
+    async def on_stop(self) -> None:
+        self.shared.stopped()
+        await super().on_stop()
 
     async def run(self) -> None:
         await together(super().run(), *self.shared.hosted(self))
@@ -138,6 +149,10 @@ class Data(Lake):
     async def on_start(self) -> None:
         await self.shared.started(self)
 
+    async def on_stop(self) -> None:
+        self.shared.stopped()
+        await super().on_stop()
+
     async def run(self) -> None:
         await together(super().run(), *self.shared.hosted(self))
 
@@ -150,10 +165,13 @@ class Oanda:
         # Each session's latency (contract v27), reported from contract v28
         # through a class holding `report_latency` once one starts.
         self.latency = roles.Latency()
-        storage = edge.storage_dir()
-        self.raw = RawStore(storage_root(storage), storage)
-        self.connections = Connections(storage, utc_now)
-        self.pairs = PairMap(pairs_file(storage))
+        # Its storage is read once registered (`open_storage`): until then
+        # what it keeps is held in memory, and the raw records in the
+        # stand-in.
+        self.opened = False
+        self.raw = RawStore(storage_root(None))
+        self.connections = Connections(None, utc_now)
+        self.pairs = PairMap(None)
         self.wake = asyncio.Event()
         self.custody = Custody(self)
         self.links = Links(self.custody)
@@ -174,11 +192,6 @@ class Oanda:
             pairs=self.pairs,
             raw=self.raw,
             secrets=lambda: connections.config.secrets(),
-            sent=Kept(file_in(storage, "sent.json"), []),
-            cursor=Kept(file_in(storage, "cursor.json"), {}),
-            trades=Kept(file_in(storage, "trades.json"), {}),
-            waiting=Kept(file_in(storage, "waiting.json"), []),
-            rolling=Kept(file_in(storage, "rolling.json"), {}),
             scope=lambda: self.links.scope,
             latency=self.latency,
             poll_seconds=lambda: (
@@ -190,10 +203,12 @@ class Oanda:
         # before there is a connection: those heard before it starts are left
         # to its start's own reads.
         self.trading.waits_to_start = True
+        # The SDK's store, under the instance's storage as given, which keeps
+        # its records in the shard's own folder once registered.
         self.data = Data(
             self.connections,
             self.pairs,
-            edge.RawStore(storage_root(storage), kind=PRICES),
+            edge.RawStore(storage_root(edge.instance_storage_dir()), kind=PRICES),
             latency=self.latency,
             shared=self,
         )
@@ -209,6 +224,32 @@ class Oanda:
     def roles(self) -> list[Any]:
         return [self.custody, self.trading, self.data]
 
+    def open_storage(self) -> None:
+        """Its storage, read once registered -- on an instance run as shards
+        or with a standby pod, the shard's own folder (open-meridian 0.37.0)
+        -- at the first settings, which `meridian.run` delivers before any
+        class starts, and read afresh each time it is registered again: the
+        connection's files, the pair map, the raw records and the trading
+        files. Where none is granted, they are held in memory and the raw
+        records kept in the stand-in."""
+        if self.opened:
+            return
+        self.opened = True
+        storage = edge.storage_dir()
+        self.raw.root, self.raw.storage = storage_root(storage), storage
+        self.connections.open(storage)
+        self.pairs.open(pairs_file(storage))
+        self.trading.open(storage)
+
+    def stopped(self) -> None:
+        """A class stopped -- its sidecar lost, or deposed, or the plugin
+        stopping: registered again, its storage is read afresh (it may be
+        another shard's), and the plugin-wide loops kept anew."""
+        self.opened = False
+        self._keeper = None
+        self._host = None
+        self._scopes = None
+
     def keeper(self) -> Keeper:
         """The raw records' keeper, made on the first settings, once the
         classes the instance holds are registered."""
@@ -221,6 +262,7 @@ class Oanda:
     async def on_settings(self, delivered: Any) -> None:
         """Each delivery of the settings: the connection configured, the
         accounts and the account read again at once, and storage tended."""
+        self.open_storage()
         self.connections.configure(config_from(delivered.values, delivered.refused))
         self.wake.set()
         await self.keeper().tend(self.connections.config.windows)
@@ -230,6 +272,7 @@ class Oanda:
         reported through it where it is the first holding `report_latency`,
         and the plugin-wide loops kept by it where it is the first to start,
         the account scope's first delivery read now."""
+        self.open_storage()
         if role is self.trading:
             self.held = dataclasses.replace(self.held, trader=self.trading)
         if role is self.data:
