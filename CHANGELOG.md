@@ -33,6 +33,8 @@ never rolled back below it.
   markers; the SDK's `connectivity.Trader` reads fills from a venue's
   orders, which OANDA's fills, rolls and financing do not fit.
 
+SDK 0.37.1: a raw record kept from two threads at once waits instead of being dropped.
+
 ## 0.9.1
 
 Within the plugin's share at its sidecar (item 96): core's sidecar admits 16
