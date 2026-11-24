@@ -87,7 +87,11 @@ pricing answered the data role.
    admin on both `custody` and `connectivity`, the roles that trade and read the
    account. Agents use `read_connections` and
    `choose_account` (checked by `check_choose_account`). Who chose which
-   account, and when, is kept in the plugin's storage.
+   account, and when, is kept in the plugin's storage. Where OANDA answers
+   the listing with a server error, or not at all, the plugin lists the
+   accounts again by itself, backing off from 5 seconds to at most 5
+   minutes, and its health says when; "List again" (`list_accounts_again`)
+   asks at once. A refusal, such as a bad token, is not asked again.
 4. On Account links, link the OANDA account to one of the deployment's
    accounts.
 5. To trade, an admin of `connectivity` enables trading on the connection

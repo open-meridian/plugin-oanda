@@ -48,6 +48,24 @@ class AccountChosen:
 
 
 @dataclass(frozen=True)
+class ListAgainAsked:
+    """List the accounts the token reaches again, now. Takes nothing."""
+
+
+@dataclass(frozen=True)
+class ListedAgain:
+    """What OANDA's listing answered: how many accounts the token reaches,
+    why it did not list them where it did not, and where that was OANDA's
+    own failure, when it is asked again by itself (ISO 8601, UTC)."""
+
+    listed: bool
+    accounts: int
+    listing_error: str
+    listing_retry_at: str
+    said: str
+
+
+@dataclass(frozen=True)
 class ReadAsked:
     """Read OANDA now; `back` is the page a browser is answered with."""
 
@@ -120,11 +138,13 @@ class ReachedRead:
 @dataclass(frozen=True)
 class ConnectionsRead(custody.ConnectionsRead):
     """The connection, and the account it is for: the accounts the token
-    reaches (`reached`), the one in use (`account_id`) and where it came from
-    (`account_from`: `setting`, the Account ID setting; `chosen`, an admin's
-    pick here, by `account_chosen_by`; empty, none yet), and the one
-    preselected because it is the only usable one, which is not in use until
-    an admin confirms it with choose_account."""
+    reaches (`reached`; `listing_error` where OANDA did not list them, and
+    `listing_retry_at` where it is asked again by itself), the one in use
+    (`account_id`) and where it came from (`account_from`: `setting`, the
+    Account ID setting; `chosen`, an admin's pick here, by
+    `account_chosen_by`; empty, none yet), and the one preselected because it
+    is the only usable one, which is not in use until an admin confirms it
+    with choose_account."""
 
     connections: list[ConnectionRead] = field(default_factory=list)  # type: ignore[assignment]
     mode: str = ""
@@ -136,6 +156,10 @@ class ConnectionsRead(custody.ConnectionsRead):
     reached: list[ReachedRead] = field(default_factory=list)
     listed: bool = False
     listing_error: str = ""
+    # Where OANDA failed to list the accounts (a server error, or no answer):
+    # when they are asked for again by itself, ISO 8601 in UTC; empty
+    # otherwise.
+    listing_retry_at: str = ""
     account_id: str = ""
     account_from: str = ""
     account_chosen_by: str = ""

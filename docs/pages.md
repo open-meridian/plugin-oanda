@@ -38,8 +38,9 @@ pairs, how many serve, and any currency your deployment does not hold.
 Under Manage, for an admin of the custody or connectivity role. The
 connection in use: its environment and its **Demo** or **Live** badge, the
 account and who chose it, and whether OANDA answers. Under Account, the v20
-accounts the token reaches, each usable or not with why, and **Use this
-account**. Its trading is on Connection.
+accounts the token reaches, each usable or not with why, **List again**
+to ask OANDA for them now, and **Use this account**. Its trading is on
+Connection.
 
 ## Account links
 

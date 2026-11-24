@@ -23,6 +23,14 @@ which account, and when, is kept in the plugin's storage
   v20 API this plugin speaks does not reach one.
 - An `account_id` setting, where given, is the choice, as before 0.3.0, and
   no pick is taken while it is set.
+- Where OANDA does not list the accounts because of its own failure -- a
+  server error (HTTP 5xx), or no answer at all -- the listing is asked again
+  by itself, the first time after `RETRY_FIRST_SECONDS`, each time after
+  twice as long, never longer than `RETRY_MOST_SECONDS`, and the plugin's
+  health says so and when. A refusal (HTTP 4xx, such as a bad token) is not
+  asked again: it says why, and waits for the settings to change. "List
+  again" on Connections (`list_accounts_again`) asks at once, and starts
+  the back-off over.
 
 **A new connection is read-only** until an admin of the plugin's
 `connectivity` role enables trading on it (as SnapTrade's are; the order
@@ -51,8 +59,8 @@ means the synthetic account, as before 0.3.0. Nothing in it reaches OANDA.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import synthetic
@@ -71,6 +79,17 @@ V1 = (
     "a v1 account (its ID is digits only): this plugin speaks OANDA's v20 API, which does not "
     "reach v1 accounts"
 )
+
+
+#: How long the listing waits before asking OANDA again after its first
+#: failure to answer, doubled for each failure after, up to the most.
+RETRY_FIRST_SECONDS: float = 5
+RETRY_MOST_SECONDS: float = 300
+
+
+def retry_seconds(failures: int) -> float:
+    """How long to wait before listing again after `failures` in a row."""
+    return float(min(RETRY_FIRST_SECONDS * 2 ** (failures - 1), RETRY_MOST_SECONDS))
 
 
 @dataclass(frozen=True)
@@ -102,11 +121,14 @@ def reached_from(listed: list[Json]) -> tuple[Reached, ...]:
 class Listing:
     """The accounts the token reaches, as last listed: `listed` once OANDA
     has been asked for them with these settings, `error` where it did not
-    answer the last time."""
+    answer the last time, and where that was OANDA's own failure, when it is
+    asked again (`retry_at`) after how many failures in a row (`attempts`)."""
 
     accounts: tuple[Reached, ...] = ()
     listed: bool = False
     error: str = ""
+    retry_at: datetime | None = None
+    attempts: int = 0
 
     @property
     def usable(self) -> tuple[Reached, ...]:
@@ -157,13 +179,28 @@ class Connection:
         return f"{self.account_id} ({where})"
 
 
+def _retriable(failure: VenueError) -> bool:
+    """Whether the failure is OANDA's to put right, so worth asking again: a
+    server error, or no answer. A refusal (4xx) is not."""
+    return failure.status is None or failure.status >= 500
+
+
 def _said(failure: VenueError) -> str:
     """Why OANDA did not list the accounts, in words for the page."""
     if failure.unauthorised:
         return (
             "OANDA refused the access token (HTTP 401): make a new one and enter it in Settings"
         )
-    return f"OANDA did not answer ({failure})"
+    if failure.status is None:
+        return f"OANDA did not answer ({failure})"
+    if failure.status >= 500:
+        return f"OANDA answered with a server error ({failure})"
+    return f"OANDA refused the listing ({failure})"
+
+
+def _at(moment: datetime) -> str:
+    """A moment for the page and the health: its time of day, in UTC."""
+    return moment.astimezone(UTC).strftime("%H:%M:%S UTC")
 
 
 class Connections:
@@ -256,7 +293,8 @@ class Connections:
 
     async def discover(self) -> Listing:
         """Ask OANDA for the accounts the token reaches (`GET /v3/accounts`).
-        Where it does not answer, the last listing stands, saying why."""
+        Where it does not answer, the last listing stands, saying why, and
+        where that was OANDA's own failure, when it is asked again."""
         venue, key = self.venue(), self._key()
         if venue is None or key is None:
             return Listing()
@@ -265,12 +303,39 @@ class Connections:
         except VenueError as failure:
             if self._key() != key:
                 return self.listing
-            listing = Listing(self.listing.accounts, listed=True, error=_said(failure))
+            last = self.listing
+            retry_at, attempts = None, 0
+            if _retriable(failure):
+                attempts = last.attempts + 1
+                retry_at = self._now() + timedelta(seconds=retry_seconds(attempts))
+            listing = Listing(
+                last.accounts,
+                listed=True,
+                error=_said(failure),
+                retry_at=retry_at,
+                attempts=attempts,
+            )
             self._listing = (key, listing)
             return listing
         if self._key() != key:
             return self.listing
         return self.take(listed)
+
+    async def list_again(self) -> Listing:
+        """Ask OANDA for the accounts now, as a person asked: the back-off
+        starts over."""
+        key = self._key()
+        if key is not None and self._listing is not None and self._listing[0] == key:
+            self._listing = (key, replace(self._listing[1], retry_at=None, attempts=0))
+        return await self.discover()
+
+    def retry_in(self) -> float | None:
+        """Seconds until the listing is asked again after OANDA's failure to
+        answer (0 when due), or None where nothing is to be asked again."""
+        retry_at = self.listing.retry_at
+        if retry_at is None:
+            return None
+        return max(0.0, (retry_at - self._now()).total_seconds())
 
     # ── The account chosen ──────────────────────────────────────────────
 
@@ -336,9 +401,19 @@ class Connections:
         return ""
 
     def waiting(self) -> str:
-        """What the plugin waits for while there is no connection."""
+        """What the plugin waits for while there is no connection: its
+        settings, OANDA's listing of the accounts (asked again, saying when,
+        or refused, saying why), or an admin's choice."""
         if self.venue() is None:
             return "waiting for its settings: " + ", ".join(self.config.missing)
+        listing = self.listing
+        if listing.error and listing.retry_at is not None:
+            return (
+                f"{listing.error}; listing the accounts again at {_at(listing.retry_at)} "
+                f"(try {listing.attempts + 1})"
+            )
+        if listing.error:
+            return listing.error
         return "waiting for an admin to choose the OANDA account on Connections"
 
     # ── The connection ──────────────────────────────────────────────────

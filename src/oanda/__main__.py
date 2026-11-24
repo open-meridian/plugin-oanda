@@ -317,21 +317,38 @@ class Oanda:
         with custody the account read, on every poll and every settings
         change; storage tended after each. One of these runs: the classes'
         run() is `together`'s. A read stopped for load waits for the next
-        poll, what it left carried (custody.py)."""
+        poll, what it left carried (custody.py).
+
+        Where OANDA failed to list the accounts (a server error, or no
+        answer), the listing is asked again at its back-off's time, sooner
+        than the next poll (connection.py), and the health said again while
+        there is no connection; the account read and the tending wait for
+        the poll."""
         syncer = self.syncer
+        connections = syncer.connections
+        clock = asyncio.get_running_loop().time
+        read_due = 0.0
         while True:
             self.wake.clear()
             try:
-                await syncer.connections.discover()
-                if bound(self.custody):
+                await connections.discover()
+                due = clock() >= read_due
+                if due:
+                    read_due = clock() + connections.config.poll_seconds
+                if bound(self.custody) and (due or connections.current is None):
                     await syncer.run_once()
-                await self.keeper().tend(syncer.connections.config.windows)
+                if due:
+                    await self.keeper().tend(connections.config.windows)
             except meridian.MeridianError as failed:
                 log.warning("this read stopped: %s", failure(failed))
+            wait: float = connections.config.poll_seconds
+            retry = connections.retry_in()
+            if retry is not None:
+                wait = min(wait, retry)
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(
-                    self.wake.wait(), timeout=syncer.connections.config.poll_seconds
-                )
+                await asyncio.wait_for(self.wake.wait(), timeout=wait)
+                # Woken by a settings change or a person: read now.
+                read_due = 0.0
 
 
 def main() -> None:

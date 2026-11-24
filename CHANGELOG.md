@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Listing the OANDA accounts is retried with a bounded back-off after a server error or no answer, and "List again" on Connections (`list_accounts_again`) asks at once.
+
 ## 0.10.0
 
 On open-meridian 0.37.0 (`meridian plugin migrate --to 0.37.0`: the SDK,
