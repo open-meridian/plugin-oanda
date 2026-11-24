@@ -11,6 +11,15 @@ The token was revoked, or is for the other environment. Make a new token in
 OANDA's hub for the account's login and enter it, with the matching
 Environment.
 
+## The accounts were not listed
+
+Connections names what OANDA answered. Where it was a server error, or no
+answer at all, the plugin lists the accounts again by itself, first after a
+few seconds and then waiting twice as long each time, at most five minutes;
+Connections and the status dot say when. **List again**, under Account,
+asks at once. A refusal, such as a bad token, is not asked again: put right
+what it names in Settings.
+
 ## No account to choose
 
 The token reaches no v20 account, or only v1 accounts, which are listed as

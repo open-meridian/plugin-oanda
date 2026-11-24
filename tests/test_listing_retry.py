@@ -24,9 +24,9 @@ from oanda.__main__ import Oanda
 from oanda.connection import Connections
 from oanda.settings import ENVIRONMENT, PRACTICE, TOKEN, config_from
 from oanda.venue import Json, VenueError
+from test_account_choice import NOT_A_TOKEN, A, Listed, held
 
 from conftest import NOW, Clock
-from test_account_choice import A, NOT_A_TOKEN, Listed, held
 
 
 class Scripted(Listed):

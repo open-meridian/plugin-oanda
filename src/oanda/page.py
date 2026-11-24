@@ -54,6 +54,7 @@ import http.server
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode
@@ -91,6 +92,7 @@ CONNECTIONS = "/admin/connections"
 ACCOUNTS = "/admin/accounts"
 READ = "/read"
 CHOOSE_ACCOUNT = f"{CONNECTIONS}/choose-account"
+LIST_AGAIN = f"{CONNECTIONS}/list-again"
 LINK = "/admin/accounts/link"
 CHECK = "/check"
 INTENTS = ("link", "create", "unlink")
@@ -98,6 +100,7 @@ pages.environment.globals["paths"] = {
     "read": READ,
     "connections": CONNECTIONS,
     "choose_account": CHOOSE_ACCOUNT,
+    "list_again": LIST_AGAIN,
     "link": LINK,
     "raw": RAW,
     "statements": STATEMENTS,
@@ -439,11 +442,16 @@ def _connections_read() -> records.ConnectionsRead:
         ],
         listed=listing.listed,
         listing_error=listing.error,
+        listing_retry_at=_iso(listing.retry_at),
         account_id=choice.account_id,
         account_from=choice.source,
         account_chosen_by=choice.by,
         preselected="" if choice.account_id else listing.preselected,
     )
+
+
+def _iso(moment: datetime | None) -> str:
+    return moment.astimezone(UTC).isoformat(timespec="seconds") if moment else ""
 
 
 def _turned_off(connection_id: str) -> str:
@@ -659,6 +667,57 @@ async def check_choose_account(request: meridian.Request) -> meridian.Response:
     return pages.answer(
         "connections.html", records.AccountChosen(account_id, connection_id, trading, said)
     )
+
+
+@pages.route(
+    LIST_AGAIN,
+    levels="admin",
+    roles=["custody", "connectivity"],
+    methods=["POST"],
+    params=records.ListAgainAsked,
+    answers=records.ListedAgain,
+    reads=True,
+    name="list_accounts_again",
+    description=(
+        "Ask OANDA again, now, for the accounts the access token reaches, as "
+        "read_connections lists them under reached. Where OANDA failed to list them (a "
+        "server error, or no answer) the plugin asks again by itself, backing off, and "
+        "this asks at once and starts the back-off over; a refusal, such as a bad token, "
+        "says why. Changes nothing at OANDA and chooses no account."
+    ),
+)
+async def list_accounts_again(request: meridian.Request) -> meridian.Response:
+    if (too_big := _oversized(request)) is not None:
+        return too_big
+    connections = _now().connections
+    if connections.venue() is None:
+        detail = "Nothing to list until the access token is set."
+        if request.tool_name:
+            pages.refuse(detail, reason="unavailable")
+        return _connections(request, Notice(detail, "warn"))
+    listing = await connections.list_again()
+    if listing.error and listing.retry_at is not None:
+        said = (
+            f"The accounts were not listed: {listing.error}. Listing them again at "
+            f"{_iso(listing.retry_at)}."
+        )
+    elif listing.error:
+        said = f"The accounts were not listed: {listing.error}."
+    else:
+        count = len(listing.accounts)
+        said = f"The token reaches {count} account{'' if count == 1 else 's'}."
+    if request.tool_name:
+        return pages.answer(
+            "connections.html",
+            records.ListedAgain(
+                listing.listed,
+                len(listing.accounts),
+                listing.error,
+                _iso(listing.retry_at),
+                said,
+            ),
+        )
+    return _connections(request, Notice(said, "warn" if listing.error else "good"))
 
 
 # ── Account links, at admin ─────────────────────────────────────────────────
